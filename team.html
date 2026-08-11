@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Team Profile · D3 Roster Movement</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --field:#0F2E22; --field-dark:#0A2118; --chalk:#F4F1E8;
+    --gold:#C9A227; --gold-bright:#E4BE3F; --rust:#B24A3A; --rust-bright:#D15F4C;
+    --line:rgba(244,241,232,0.14); --muted:#9FB0A3; --stale:#5C6B62;
+    --display:'Anton',sans-serif; --body:'IBM Plex Sans',sans-serif; --mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--field);color:var(--chalk);font-family:var(--body);
+    background-image:repeating-linear-gradient(90deg,transparent,transparent 78px,rgba(244,241,232,0.035) 78px,rgba(244,241,232,0.035) 80px);}
+  .wrap{max-width:1180px;margin:0 auto;padding:36px 28px 80px;}
+
+  .crumb{color:var(--muted);cursor:pointer;text-decoration:none;font-family:var(--mono);font-size:12px;}
+  .crumb:hover{color:var(--gold-bright);}
+
+  .picker-bar{
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    background:rgba(244,241,232,0.03);border:1px solid var(--line);border-radius:2px;
+    padding:14px 18px;margin:18px 0 30px;
+  }
+  .picker-label{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
+  .search{font-family:var(--mono);font-size:13px;background:var(--field-dark);border:1px solid var(--line);
+    color:var(--chalk);padding:9px 14px;border-radius:20px;flex:1;min-width:240px;outline:none;}
+  .search::placeholder{color:var(--muted);}
+  .search:focus{border-color:var(--gold);}
+  .picker-hint{font-family:var(--mono);font-size:11px;color:var(--muted);}
+
+  .empty-state{padding:60px 20px;text-align:center;color:var(--muted);font-family:var(--mono);font-size:13px;}
+  .empty-state b{color:var(--chalk);}
+
+  #teamContent{display:none;}
+  #teamContent.show{display:block;}
+
+  .team-header{border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:30px;}
+  .team-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--gold-bright);
+    margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  h1{font-family:var(--display);font-size:clamp(28px,5vw,50px);letter-spacing:0.01em;line-height:0.98;margin:0 0 10px;text-transform:uppercase;}
+  .team-badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+  .badge{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:4px 10px;border-radius:12px;}
+  .badge.fresh{background:rgba(201,162,39,0.18);color:var(--gold-bright);}
+  .badge.stale{background:rgba(92,107,98,0.22);color:var(--stale);}
+  .badge.err{background:rgba(178,74,58,0.18);color:var(--rust-bright);}
+  .error-note{margin-top:12px;font-family:var(--mono);font-size:12px;color:var(--rust-bright);
+    background:rgba(178,74,58,0.1);border:1px solid rgba(178,74,58,0.3);padding:9px 13px;border-radius:2px;}
+
+  .stat-row{display:flex;flex-wrap:wrap;margin-top:20px;border-top:1px solid var(--line);}
+  .stat{flex:1;min-width:110px;padding:14px 18px 0 0;border-right:1px solid var(--line);}
+  .stat:last-child{border-right:none;}
+  .stat .n{font-family:var(--mono);font-size:24px;font-weight:700;color:var(--gold-bright);}
+  .stat .n.rust{color:var(--rust-bright);}
+  .stat .n.muted{color:var(--muted);}
+  .stat .l{font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);margin-top:2px;}
+
+  section{margin-bottom:44px;}
+  .section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px;}
+  h2{font-family:var(--display);font-size:20px;text-transform:uppercase;letter-spacing:0.03em;margin:0;}
+  .section-note{color:var(--muted);font-size:12.5px;font-family:var(--mono);max-width:420px;text-align:right;}
+  .panel{background:rgba(244,241,232,0.03);border:1px solid var(--line);border-radius:2px;padding:20px;}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media (max-width:760px){.two-col{grid-template-columns:1fr;}}
+
+  /* comparison bars (used by class / position / size panels) */
+  .cmp-row{display:grid;grid-template-columns:112px 1fr 220px;gap:14px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);}
+  .cmp-row:last-child{border-bottom:none;}
+  .cmp-label{font-family:var(--mono);font-size:11.5px;color:var(--chalk);text-transform:uppercase;letter-spacing:.04em;}
+  .cmp-track{position:relative;height:14px;background:rgba(244,241,232,0.06);border-radius:2px;}
+  .cmp-fill{position:absolute;left:0;top:0;bottom:0;background:var(--gold);border-radius:2px;transition:width .2s;}
+  .cmp-mark{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--chalk);opacity:.6;}
+  .cmp-values{font-family:var(--mono);font-size:11px;text-align:right;color:var(--muted);line-height:1.6;}
+  .cmp-values b{color:var(--chalk);font-size:12px;}
+  .delta{font-weight:700;margin-left:5px;}
+  .delta.up{color:var(--gold-bright);}
+  .delta.down{color:var(--rust-bright);}
+  .delta.flat{color:var(--muted);}
+  .cmp-legend{display:flex;gap:16px;margin-top:12px;font-family:var(--mono);font-size:10.5px;color:var(--muted);flex-wrap:wrap;}
+  .cmp-legend .swatch{width:10px;height:10px;display:inline-block;border-radius:2px;background:var(--gold);margin-right:5px;vertical-align:-1px;}
+  .cmp-legend .tick{width:2px;height:10px;display:inline-block;background:var(--chalk);opacity:.6;margin-right:5px;vertical-align:-1px;}
+
+  .index-callout{display:flex;align-items:baseline;gap:10px;margin-bottom:16px;font-family:var(--mono);}
+  .index-callout .big{font-family:var(--display);font-size:38px;color:var(--gold-bright);}
+  .index-callout .desc{color:var(--muted);font-size:12px;max-width:320px;}
+
+  /* geography */
+  .geo-row{display:grid;grid-template-columns:110px 1fr 50px;gap:12px;align-items:center;padding:6px 0;}
+  .geo-label{font-family:var(--mono);font-size:12px;color:var(--chalk);}
+  .geo-track{height:11px;background:rgba(244,241,232,0.06);border-radius:2px;overflow:hidden;}
+  .geo-fill{height:100%;background:var(--gold);}
+  .geo-count{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;}
+  .geo-summary{display:flex;gap:22px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
+  .geo-summary .item{font-family:var(--mono);}
+  .geo-summary .item .n{color:var(--gold-bright);font-weight:700;font-size:15px;}
+  .geo-summary .item .l{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;}
+  .geo-note{font-family:var(--mono);font-size:11px;color:var(--stale);margin-top:10px;}
+
+  /* transfer portal */
+  .transfer-net{display:flex;align-items:baseline;gap:10px;margin-bottom:18px;font-family:var(--mono);}
+  .transfer-net .big{font-family:var(--display);font-size:34px;}
+  .transfer-net .big.up{color:var(--gold-bright);}
+  .transfer-net .big.down{color:var(--rust-bright);}
+  .transfer-net .big.flat{color:var(--muted);}
+  .transfer-cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media (max-width:640px){.transfer-cols{grid-template-columns:1fr;}}
+  .transfer-col h3{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px;}
+  .transfer-item{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:7px 0;border-bottom:1px solid var(--line);}
+  .transfer-item:last-child{border-bottom:none;}
+  .transfer-item .who{font-weight:600;}
+  .transfer-item .where{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;}
+  .transfer-empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:8px 0;}
+
+  /* conference standing */
+  .standing-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .standing-table th{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);}
+  .standing-table th.num,.standing-table td.num{text-align:right;font-family:var(--mono);}
+  .standing-table td{padding:7px 10px;border-bottom:1px solid var(--line);}
+  .standing-table tr.me{background:rgba(201,162,39,0.12);}
+  .standing-table tr.me td{color:var(--gold-bright);font-weight:700;}
+  .standing-table tr:last-child td{border-bottom:none;}
+  .rank-note{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:12px;}
+  .rank-note b{color:var(--gold-bright);}
+
+  /* roster table */
+  .roster-group{margin-bottom:18px;}
+  .roster-group:last-child{margin-bottom:0;}
+  .roster-group-head{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);padding:6px 2px;display:flex;align-items:center;gap:8px;}
+  .roster-grid{display:grid;grid-template-columns:1fr;gap:1px;background:var(--line);border:1px solid var(--line);}
+  .row-head,.row{display:grid;grid-template-columns:1.5fr 0.6fr 0.55fr 0.7fr 0.7fr 1fr 1.3fr;align-items:center;background:var(--field);}
+  .row-head{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:9px 14px;background:rgba(244,241,232,0.04);}
+  .row{padding:9px 14px;font-size:13px;}
+  .row:hover{background:rgba(244,241,232,0.05);}
+  .cell-name{font-weight:600;}
+  .mono-cell{font-family:var(--mono);font-size:12px;color:var(--muted);}
+  .status-badge{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;padding:3px 7px;border-radius:10px;display:inline-block;white-space:nowrap;}
+  .status-Returning{background:rgba(159,176,163,0.15);color:var(--muted);}
+  .status-New{background:rgba(201,162,39,0.18);color:var(--gold-bright);}
+  .status-Gone{background:rgba(178,74,58,0.18);color:var(--rust-bright);}
+  .status-Gone.dep-transferred{background:rgba(209,95,76,0.22);color:var(--rust-bright);}
+  .status-Gone.dep-graduated{background:rgba(122,147,166,0.22);color:#9DB8C9;}
+  .status-Gone.dep-other{background:rgba(178,74,58,0.12);color:var(--stale);}
+  .status-badge[title]{cursor:help;}
+  @media (max-width:720px){
+    .row-head,.row{grid-template-columns:1.3fr 0.5fr 0.8fr 1.3fr;}
+    .row-head>*:nth-child(4),.row>*:nth-child(4),
+    .row-head>*:nth-child(5),.row>*:nth-child(5),
+    .row-head>*:nth-child(6),.row>*:nth-child(6){display:none;}
+    .cmp-row{grid-template-columns:88px 1fr;}
+    .cmp-values{grid-column:1 / -1;text-align:left;}
+  }
+
+  footer{color:var(--muted);font-family:var(--mono);font-size:11px;text-align:center;padding-top:20px;border-top:1px solid var(--line);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <a class="crumb" href="index.html">&larr; Dashboard</a>
+
+  <div class="picker-bar">
+    <span class="picker-label">Team Profile</span>
+    <input class="search" id="schoolSearch" list="schoolListDatalist" placeholder="Type a school name…" autocomplete="off">
+    <datalist id="schoolListDatalist"></datalist>
+    <span class="picker-hint" id="pickerHint"></span>
+  </div>
+
+  <div class="empty-state" id="emptyState">Loading roster data&hellip;</div>
+
+  <div id="teamContent">
+
+    <div class="team-header">
+      <div class="team-eyebrow" id="teamEyebrow"></div>
+      <h1 id="teamName"></h1>
+      <div class="team-badges" id="teamBadges"></div>
+      <div class="error-note" id="teamError" style="display:none;"></div>
+      <div class="stat-row" id="statRow"></div>
+    </div>
+
+    <div class="two-col">
+      <section>
+        <div class="section-head">
+          <h2>Class Composition</h2>
+          <div class="section-note">Current roster (returning + new) by class year</div>
+        </div>
+        <div class="panel">
+          <div class="index-callout">
+            <div class="big" id="expIndexVal">&mdash;</div>
+            <div class="desc">Experience index &middot; 1 (all Fr) to 5 (all Gr), weighted by class year. Conference avg <b id="expIndexConf">&mdash;</b>.</div>
+          </div>
+          <div id="classBars"></div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>Position Group Depth</h2>
+          <div class="section-note">Roster count per group vs. conference avg per school</div>
+        </div>
+        <div class="panel">
+          <div id="posBars"></div>
+          <div class="cmp-legend">
+            <span><span class="swatch"></span>This school</span>
+            <span><span class="tick"></span>Conference avg / school</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section>
+      <div class="section-head">
+        <h2>Size Profile</h2>
+        <div class="section-note">Average height &amp; weight by position group vs. conference avg</div>
+      </div>
+      <div class="panel">
+        <div id="sizeBars"></div>
+        <div class="cmp-legend">
+          <span><span class="swatch"></span>This school</span>
+          <span><span class="tick"></span>Conference avg</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="two-col">
+      <section>
+        <div class="section-head">
+          <h2>Recruiting Geography</h2>
+          <div class="section-note">Hometown state, parsed from free-text roster bios</div>
+        </div>
+        <div class="panel">
+          <div id="geoBars"></div>
+          <div class="geo-summary" id="geoSummary"></div>
+          <div class="geo-note">Heuristic: states are parsed from the trailing "City, ST" segment of each hometown and normalized from mixed AP/postal styles &mdash; a handful of unusual formats may be misbucketed.</div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>Transfer Portal Network</h2>
+          <div class="section-note">Confirmed name-matched transfers, this snapshot only</div>
+        </div>
+        <div class="panel">
+          <div class="transfer-net" id="transferNet"></div>
+          <div class="transfer-cols">
+            <div class="transfer-col">
+              <h3>Arrived Via Transfer</h3>
+              <div id="transferIn"></div>
+            </div>
+            <div class="transfer-col">
+              <h3>Departed Via Transfer</h3>
+              <div id="transferOut"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section>
+      <div class="section-head">
+        <h2>Conference Standing</h2>
+        <div class="section-note">Ranked by retention rate among schools with a fresh snapshot</div>
+      </div>
+      <div class="panel">
+        <table class="standing-table" id="standingTable"></table>
+        <div class="rank-note" id="rankNote"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Full Roster</h2>
+        <div class="section-note" id="rosterNote"></div>
+      </div>
+      <div id="rosterTables"></div>
+    </section>
+
+  </div>
+
+  <footer>Source: roster snapshot dataset. Schools without a fresh crawl show no turnover for this snapshot &mdash; that's a data gap, not zero movement.</footer>
+</div>
+
+<script>
+/* ============ shared parsing helpers (mirrors index.html) ============ */
+const CLASS_ORDER = ["Fr","R-Fr","So","R-So","Jr","R-Jr","Sr","R-Sr","Gr"];
+const CLASS_WEIGHT = {Fr:1,"R-Fr":1,So:2,"R-So":2,Jr:3,"R-Jr":3,Sr:4,"R-Sr":4,Gr:5};
+
+function parseHeightToInches(str){
+  if(!str) return null;
+  str = String(str).trim();
+  let m = str.match(/^(\d{1,2})-(\d{1,2})?$/);
+  if(m) return parseInt(m[1])*12 + (m[2] ? parseInt(m[2]) : 0);
+  m = str.match(/^(\d{1,2})['’]\s*(\d{1,2})/);
+  if(m) return parseInt(m[1])*12 + parseInt(m[2]);
+  m = str.match(/^(\d{2,3})$/);
+  if(m) return parseInt(m[1]);
+  return null;
+}
+function parseWeightToLbs(str){
+  if(!str) return null;
+  const m = String(str).match(/(\d+)/);
+  return m ? parseInt(m[1]) : null;
+}
+function formatInches(inches){
+  if(inches == null) return "&mdash;";
+  const total = Math.round(inches);
+  const ft = Math.floor(total/12), inch = total - ft*12;
+  return `${ft}'${inch}"`;
+}
+
+const OFFENSE_ORDER = ["QB","RB","FB","HB","TB","WR","SL","SLOT","SB","H","TE","OL","OT","OG","G","C"];
+const DEFENSE_ORDER = ["DL","DE","DT","NT","EDGE","LB","OLB","ILB","MLB","SPUR","STAR","BANDIT","DB","CB","NB","S","FS","SS","SAF","ROV"];
+const ST_ORDER = ["K","PK","P","LS","SPEC"];
+const POSITION_GROUPS = ["Offense","Defense","Special Teams","Other"];
+
+function classifyPosition(raw){
+  if(!raw) return {category:"Other", rank:999};
+  const tokens = raw.toUpperCase().split(/[\/\s]+/).filter(Boolean);
+  for(const tok of tokens){
+    let idx = OFFENSE_ORDER.indexOf(tok);
+    if(idx !== -1) return {category:"Offense", rank:idx};
+    idx = DEFENSE_ORDER.indexOf(tok);
+    if(idx !== -1) return {category:"Defense", rank:idx};
+    idx = ST_ORDER.indexOf(tok);
+    if(idx !== -1) return {category:"Special Teams", rank:idx};
+  }
+  const lower = raw.toLowerCase();
+  if(/quarterback/.test(lower)) return {category:"Offense", rank:0};
+  if(/running back/.test(lower)) return {category:"Offense", rank:1};
+  if(/fullback/.test(lower)) return {category:"Offense", rank:2};
+  if(/wide receiver/.test(lower)) return {category:"Offense", rank:4};
+  if(/tight end/.test(lower)) return {category:"Offense", rank:6};
+  if(/offensive/.test(lower)) return {category:"Offense", rank:7};
+  if(/defensive end/.test(lower)) return {category:"Defense", rank:1};
+  if(/defensive tackle/.test(lower)) return {category:"Defense", rank:2};
+  if(/defensive line/.test(lower)) return {category:"Defense", rank:0};
+  if(/linebacker/.test(lower)) return {category:"Defense", rank:5};
+  if(/defensive back/.test(lower)) return {category:"Defense", rank:9};
+  if(/cornerback/.test(lower)) return {category:"Defense", rank:10};
+  if(/safety/.test(lower)) return {category:"Defense", rank:11};
+  if(/kicker/.test(lower)) return {category:"Special Teams", rank:0};
+  if(/punter/.test(lower)) return {category:"Special Teams", rank:1};
+  if(/(long snapper|snapper)/.test(lower)) return {category:"Special Teams", rank:2};
+  if(/(coach|manager|mgr)/.test(lower)) return {category:"Other", rank:0};
+  return {category:"Other", rank:998};
+}
+
+function escapeHtml(str){
+  if(str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function departureInfo(p){
+  if(p.category !== "Gone") return null;
+  const r = p.departureReason || "";
+  if(r.startsWith("Transferred to ")) return {label:"Transferred", cls:"transferred", title:r};
+  if(r === "Graduated (likely)") return {label:"Graduated", cls:"graduated", title:r};
+  if(r === "Transferred/other (likely)") return {label:"Left (Other)", cls:"other", title:r};
+  return {label:"Gone", cls:"other", title:"Departure reason not available for this snapshot."};
+}
+
+/* ============ hometown -> state/region normalization ============ */
+const LOCATION_MAP = (() => {
+  const m = {};
+  const add = (label, keys) => keys.forEach(k => { m[k.toLowerCase().replace(/[.\s]/g,"")] = label; });
+  add("Alabama", ["AL","Ala"]);
+  add("Alaska", ["AK","Alaska","Alas"]);
+  add("Arizona", ["AZ","Ariz","Az"]);
+  add("Arkansas", ["AR","Ark","Ar"]);
+  add("California", ["CA","Calif","Cal","Cali","Ca"]);
+  add("Colorado", ["CO","Colo","Col","Co"]);
+  add("Connecticut", ["CT","Conn","Ct"]);
+  add("Delaware", ["DE","Del","De"]);
+  add("Florida", ["FL","Fla","Fl"]);
+  add("Georgia", ["GA","Ga"]);
+  add("Hawaii", ["HI","Hawaii","Hawai'i","Hawai’i","Hi"]);
+  add("Idaho", ["ID","Idaho","Ida"]);
+  add("Illinois", ["IL","Ill","Il","Illnois"]);
+  add("Indiana", ["IN","Ind"]);
+  add("Iowa", ["IA","Iowa"]);
+  add("Kansas", ["KS","Kan","Ks"]);
+  add("Kentucky", ["KY","Ky"]);
+  add("Louisiana", ["LA","La","Lou","Louis"]);
+  add("Maine", ["ME","Maine","Me"]);
+  add("Maryland", ["MD","Md"]);
+  add("Massachusetts", ["MA","Mass"]);
+  add("Michigan", ["MI","Mich","MIch","Mi"]);
+  add("Minnesota", ["MN","Minn","Mn"]);
+  add("Mississippi", ["MS","Miss","Ms"]);
+  add("Missouri", ["MO","Mo"]);
+  add("Montana", ["MT","Mont"]);
+  add("Nebraska", ["NE","Neb"]);
+  add("Nevada", ["NV","Nev"]);
+  add("New Hampshire", ["NH","N.H"]);
+  add("New Jersey", ["NJ","N.J","N. J"]);
+  add("New Mexico", ["NM","N.M","N.Mex"]);
+  add("New York", ["NY","N.Y"]);
+  add("North Carolina", ["NC","N.C"]);
+  add("North Dakota", ["ND","N.D"]);
+  add("Ohio", ["OH","Ohio","Oh"]);
+  add("Oklahoma", ["OK","Okla","Oklah"]);
+  add("Oregon", ["OR","Ore"]);
+  add("Pennsylvania", ["PA","Pa","Penn"]);
+  add("Rhode Island", ["RI","R.I"]);
+  add("South Carolina", ["SC","S.C","Sc"]);
+  add("South Dakota", ["SD","S.D"]);
+  add("Tennessee", ["TN","Tenn"]);
+  add("Texas", ["TX","Texas","Tex","Tx"]);
+  add("Utah", ["UT","Utah"]);
+  add("Vermont", ["VT","Vt"]);
+  add("Virginia", ["VA","Va"]);
+  add("Washington", ["WA","Wash"]);
+  add("West Virginia", ["WV","W.Va","W.V","W.VA"]);
+  add("Wisconsin", ["WI","Wis","Wisc","WIs","Wiis","Wisconsin"]);
+  add("Wyoming", ["WY","Wyo"]);
+  add("Washington, D.C.", ["DC","D.C"]);
+  add("Ontario", ["Ontario","ON","ONT"]);
+  add("Quebec", ["Quebec","Que"]);
+  add("Alberta", ["Alberta","Alta"]);
+  add("Manitoba", ["Manitoba"]);
+  add("British Columbia", ["British Columbia"]);
+  return m;
+})();
+
+function normalizeLocation(hometown){
+  if(!hometown) return null;
+  const parts = String(hometown).split(",");
+  if(parts.length < 2) return null;
+  const raw = parts[parts.length-1].trim().replace(/\.+$/,"");
+  if(!raw) return null;
+  const key = raw.toLowerCase().replace(/[.\s]/g,"");
+  const mapped = LOCATION_MAP[key];
+  if(mapped) return {label: mapped, intl: false};
+  return {label: raw.replace(/\b\w/g, c=>c.toUpperCase()), intl: true};
+}
+
+/* ============ data loading ============ */
+async function loadData(){
+  const res = await fetch('https://etchglow.github.io/data.json', {cache:"no-store"});
+  if(!res.ok) throw new Error("fetch failed: " + res.status);
+  return await res.json();
+}
+
+function flattenSchools(data){
+  const list = [];
+  data.conferences.forEach(conf=>{
+    conf.schools.forEach(s=>{
+      list.push(Object.assign({confName: conf.name}, s));
+    });
+  });
+  return list;
+}
+
+const APP = { data:null, schools:[], byName:new Map() };
+
+/* ============ per-school metric computations ============ */
+function currentRoster(school){
+  return school.players.filter(p=>p.category !== "Gone");
+}
+
+function computeClassComposition(players){
+  const counts = {};
+  CLASS_ORDER.forEach(c=>counts[c]=0);
+  let weightedSum = 0, weightedN = 0;
+  players.forEach(p=>{
+    const cls = p.cls || "";
+    if(counts.hasOwnProperty(cls)) counts[cls]++;
+    if(CLASS_WEIGHT[cls]){ weightedSum += CLASS_WEIGHT[cls]; weightedN++; }
+  });
+  return {counts, expIndex: weightedN ? weightedSum/weightedN : null};
+}
+
+function computePositionDepth(players){
+  const counts = {Offense:0, Defense:0, "Special Teams":0, Other:0};
+  players.forEach(p=>{ counts[classifyPosition(p.position).category]++; });
+  return counts;
+}
+
+function computeSizeProfile(players){
+  const groups = {Offense:{h:[],w:[]}, Defense:{h:[],w:[]}, "Special Teams":{h:[],w:[]}, Other:{h:[],w:[]}};
+  players.forEach(p=>{
+    const g = classifyPosition(p.position).category;
+    const h = parseHeightToInches(p.height), w = parseWeightToLbs(p.weight);
+    if(h != null) groups[g].h.push(h);
+    if(w != null) groups[g].w.push(w);
+  });
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+  const out = {};
+  Object.keys(groups).forEach(g=>{ out[g] = {avgH: avg(groups[g].h), avgW: avg(groups[g].w), n: groups[g].h.length}; });
+  return out;
+}
+
+function computeGeography(players){
+  const counts = {};
+  let intl = 0, unknown = 0, distinctHS = new Set();
+  players.forEach(p=>{
+    const loc = normalizeLocation(p.hometown);
+    if(!loc){ unknown++; return; }
+    if(loc.intl) intl++;
+    counts[loc.label] = (counts[loc.label]||0) + 1;
+    if(p.highSchool) distinctHS.add(p.highSchool.trim().toLowerCase());
+  });
+  const ranked = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
+  return {ranked, distinctStates: ranked.length, distinctHS: distinctHS.size, intl, unknown, total: players.length};
+}
+
+function computeConferenceAverages(confSchools, thisSchoolName){
+  const withPlayers = confSchools.filter(s=>s.players && s.players.length);
+  const n = withPlayers.length || 1;
+
+  let expSum = 0, expN = 0;
+  const posTotals = {Offense:0, Defense:0, "Special Teams":0, Other:0};
+  const sizeGroups = {Offense:{h:[],w:[]}, Defense:{h:[],w:[]}, "Special Teams":{h:[],w:[]}, Other:{h:[],w:[]}};
+
+  withPlayers.forEach(s=>{
+    const roster = currentRoster(s);
+    const cc = computeClassComposition(roster);
+    if(cc.expIndex != null){ expSum += cc.expIndex; expN++; }
+    const pd = computePositionDepth(roster);
+    POSITION_GROUPS.forEach(g=>posTotals[g]+=pd[g]);
+    roster.forEach(p=>{
+      const g = classifyPosition(p.position).category;
+      const h = parseHeightToInches(p.height), w = parseWeightToLbs(p.weight);
+      if(h!=null) sizeGroups[g].h.push(h);
+      if(w!=null) sizeGroups[g].w.push(w);
+    });
+  });
+
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+  const size = {};
+  POSITION_GROUPS.forEach(g=>{ size[g] = {avgH: avg(sizeGroups[g].h), avgW: avg(sizeGroups[g].w)}; });
+
+  const posAvgPerSchool = {};
+  POSITION_GROUPS.forEach(g=>posAvgPerSchool[g] = posTotals[g]/n);
+
+  return { expIndex: expN ? expSum/expN : null, posAvgPerSchool, size, schoolCount: n };
+}
+
+function computeTransfers(allSchools, school){
+  const out = school.players
+    .filter(p=>p.category==="Gone" && (p.departureReason||"").startsWith("Transferred to "))
+    .map(p=>({name:p.name, dest:p.departureReason.slice("Transferred to ".length), position:p.position}));
+
+  const inList = [];
+  allSchools.forEach(s=>{
+    if(s.name === school.name) return;
+    s.players.forEach(p=>{
+      if(p.category==="Gone" && p.departureReason === `Transferred to ${school.name}`){
+        inList.push({name:p.name, from:s.name, position:p.position});
+      }
+    });
+  });
+  return {in: inList, out};
+}
+
+function computeStanding(confSchools, thisSchoolName){
+  const rows = confSchools
+    .filter(s=>s.status==="Success" && s.previousCount>0)
+    .map(s=>({name:s.name, retention: s.returningCount/s.previousCount*100, currentCount:s.currentCount}))
+    .sort((a,b)=>b.retention-a.retention);
+  const idx = rows.findIndex(r=>r.name===thisSchoolName);
+  const excluded = confSchools.length - rows.length;
+  return {rows, rank: idx===-1 ? null : idx+1, total: rows.length, excluded};
+}
+
+/* ============ rendering ============ */
+function fmtPct(n, digits=0){ return n==null ? "&mdash;" : n.toFixed(digits) + "%"; }
+function fmtNum(n, digits=1){ return n==null ? "&mdash;" : n.toFixed(digits); }
+
+function deltaBadge(schoolVal, confVal, formatFn, higherIsBetter=null){
+  if(schoolVal==null || confVal==null) return "";
+  const d = schoolVal - confVal;
+  if(Math.abs(d) < 0.05) return `<span class="delta flat">flat</span>`;
+  const dirCls = higherIsBetter==null ? (d>0?"up":"down") : (d>0)===higherIsBetter ? "up" : "down";
+  const sign = d>0 ? "+" : "";
+  return `<span class="delta ${dirCls}">${sign}${formatFn(d)}</span>`;
+}
+
+function renderCmpBar(container, label, schoolVal, confVal, opts={}){
+  const max = Math.max(schoolVal||0, confVal||0, opts.minMax||1) * 1.15;
+  const fmt = opts.format || (v=>v==null?"&mdash;":Math.round(v));
+  const schoolPct = max ? Math.min(100,(schoolVal||0)/max*100) : 0;
+  const confPct = max ? Math.min(100,(confVal||0)/max*100) : 0;
+  const row = document.createElement("div");
+  row.className = "cmp-row";
+  row.innerHTML = `
+    <div class="cmp-label">${escapeHtml(label)}</div>
+    <div class="cmp-track">
+      <div class="cmp-fill" style="width:${schoolPct}%"></div>
+      <div class="cmp-mark" style="left:${confPct}%"></div>
+    </div>
+    <div class="cmp-values"><b>${fmt(schoolVal)}</b> vs ${fmt(confVal)} avg ${deltaBadge(schoolVal, confVal, opts.deltaFormat || (d=>fmt(Math.abs(d))), opts.higherIsBetter)}</div>
+  `;
+  container.appendChild(row);
+}
+
+function renderTeam(school, allSchools){
+  document.getElementById("emptyState").style.display = "none";
+  const content = document.getElementById("teamContent");
+  content.classList.add("show");
+
+  const confSchools = allSchools.filter(s=>s.confName===school.confName);
+  const roster = currentRoster(school);
+
+  // header
+  document.getElementById("teamEyebrow").innerHTML =
+    `<a class="crumb" href="index.html">Dashboard</a><span>&rsaquo;</span><span>${escapeHtml(school.confName)}</span>`;
+  document.getElementById("teamName").textContent = school.name;
+
+  const badges = [];
+  if(school.status==="Success") badges.push(`<span class="badge fresh">Fresh Snapshot</span>`);
+  else badges.push(`<span class="badge stale">${escapeHtml(school.statusLabel)}</span>`);
+  document.getElementById("teamBadges").innerHTML = badges.join("");
+
+  const errEl = document.getElementById("teamError");
+  if(school.errorMessage){ errEl.style.display="block"; errEl.textContent = school.errorMessage; }
+  else errEl.style.display = "none";
+
+  const retention = school.previousCount ? school.returningCount/school.previousCount*100 : null;
+  const netChange = school.currentCount - school.previousCount;
+  document.getElementById("statRow").innerHTML = `
+    <div class="stat"><div class="n">${school.currentCount}</div><div class="l">Current Roster</div></div>
+    <div class="stat"><div class="n muted">${school.returningCount}</div><div class="l">Returning</div></div>
+    <div class="stat"><div class="n">${school.newCount}</div><div class="l">New</div></div>
+    <div class="stat"><div class="n rust">${school.goneCount}</div><div class="l">Gone</div></div>
+    <div class="stat"><div class="n">${fmtPct(retention)}</div><div class="l">Retention Rate</div></div>
+    <div class="stat"><div class="n ${netChange>0?"":netChange<0?"rust":"muted"}">${netChange>0?"+":""}${netChange}</div><div class="l">Net Roster Change</div></div>
+  `;
+
+  const confAvg = computeConferenceAverages(confSchools, school.name);
+
+  // class composition
+  const cc = computeClassComposition(roster);
+  document.getElementById("expIndexVal").innerHTML = cc.expIndex!=null ? cc.expIndex.toFixed(2) : "&mdash;";
+  document.getElementById("expIndexConf").innerHTML = confAvg.expIndex!=null ? confAvg.expIndex.toFixed(2) : "&mdash;";
+  const classBarsEl = document.getElementById("classBars"); classBarsEl.innerHTML = "";
+  const maxClassCount = Math.max(1, ...CLASS_ORDER.map(c=>cc.counts[c]));
+  CLASS_ORDER.forEach(c=>{
+    if(cc.counts[c]===0) return;
+    const row = document.createElement("div");
+    row.className = "geo-row";
+    const pct = cc.counts[c]/maxClassCount*100;
+    row.innerHTML = `<div class="geo-label">${c}</div><div class="geo-track"><div class="geo-fill" style="width:${pct}%"></div></div><div class="geo-count">${cc.counts[c]}</div>`;
+    classBarsEl.appendChild(row);
+  });
+
+  // position depth
+  const pd = computePositionDepth(roster);
+  const posBarsEl = document.getElementById("posBars"); posBarsEl.innerHTML = "";
+  POSITION_GROUPS.forEach(g=>{
+    renderCmpBar(posBarsEl, g, pd[g], confAvg.posAvgPerSchool[g], {format:v=>v==null?"&mdash;":Math.round(v*10)/10});
+  });
+
+  // size profile
+  const sp = computeSizeProfile(roster);
+  const sizeBarsEl = document.getElementById("sizeBars"); sizeBarsEl.innerHTML = "";
+  POSITION_GROUPS.forEach(g=>{
+    if(!sp[g].n) return;
+    renderCmpBar(sizeBarsEl, g+" Ht", sp[g].avgH, confAvg.size[g].avgH,
+      {format: formatInches, deltaFormat: d=>Math.abs(d).toFixed(1)+"″", minMax:60});
+    renderCmpBar(sizeBarsEl, g+" Wt", sp[g].avgW, confAvg.size[g].avgW,
+      {format:v=>v==null?"&mdash;":Math.round(v)+" lbs", deltaFormat: d=>Math.round(Math.abs(d))+" lbs", minMax:150});
+  });
+
+  // geography
+  const geo = computeGeography(roster);
+  const geoBarsEl = document.getElementById("geoBars"); geoBarsEl.innerHTML = "";
+  const topStates = geo.ranked.slice(0,8);
+  const maxGeo = topStates.length ? topStates[0][1] : 1;
+  topStates.forEach(([label,count])=>{
+    const row = document.createElement("div");
+    row.className = "geo-row";
+    row.innerHTML = `<div class="geo-label">${escapeHtml(label)}</div><div class="geo-track"><div class="geo-fill" style="width:${count/maxGeo*100}%"></div></div><div class="geo-count">${count}</div>`;
+    geoBarsEl.appendChild(row);
+  });
+  document.getElementById("geoSummary").innerHTML = `
+    <div class="item"><div class="n">${geo.distinctStates}</div><div class="l">States/Regions</div></div>
+    <div class="item"><div class="n">${geo.distinctHS}</div><div class="l">High Schools</div></div>
+    <div class="item"><div class="n">${geo.intl}</div><div class="l">Intl / Non-US</div></div>
+  `;
+
+  // transfers
+  const xfer = computeTransfers(allSchools, school);
+  const net = xfer.in.length - xfer.out.length;
+  document.getElementById("transferNet").innerHTML = `
+    <div class="big ${net>0?"up":net<0?"down":"flat"}">${net>0?"+":""}${net}</div>
+    <div class="desc" style="font-family:var(--body);color:var(--muted);font-size:12px;">net transfer margin (${xfer.in.length} in / ${xfer.out.length} out)</div>
+  `;
+  const inEl = document.getElementById("transferIn"); inEl.innerHTML = "";
+  if(!xfer.in.length) inEl.innerHTML = `<div class="transfer-empty">None confirmed in this snapshot.</div>`;
+  xfer.in.forEach(t=>{
+    const d = document.createElement("div");
+    d.className = "transfer-item";
+    d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">from ${escapeHtml(t.from)}</span>`;
+    inEl.appendChild(d);
+  });
+  const outEl = document.getElementById("transferOut"); outEl.innerHTML = "";
+  if(!xfer.out.length) outEl.innerHTML = `<div class="transfer-empty">None confirmed in this snapshot.</div>`;
+  xfer.out.forEach(t=>{
+    const d = document.createElement("div");
+    d.className = "transfer-item";
+    d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">to ${escapeHtml(t.dest)}</span>`;
+    outEl.appendChild(d);
+  });
+
+  // standing
+  const standing = computeStanding(confSchools, school.name);
+  const tbl = document.getElementById("standingTable");
+  let rowsHtml = `<tr><th>#</th><th>School</th><th class="num">Retention</th><th class="num">Roster</th></tr>`;
+  standing.rows.forEach((r,i)=>{
+    rowsHtml += `<tr class="${r.name===school.name?"me":""}"><td>${i+1}</td><td>${escapeHtml(r.name)}</td><td class="num">${fmtPct(r.retention,1)}</td><td class="num">${r.currentCount}</td></tr>`;
+  });
+  tbl.innerHTML = rowsHtml;
+  const rankNoteEl = document.getElementById("rankNote");
+  if(standing.rank){
+    const pct = Math.round(standing.rank/standing.total * 100);
+    rankNoteEl.innerHTML = `Ranked <b>#${standing.rank} of ${standing.total}</b> in ${escapeHtml(school.confName)} by retention rate (top ${pct}%).` +
+      (standing.excluded ? ` ${standing.excluded} conference school(s) excluded &mdash; no fresh snapshot.` : "");
+  } else {
+    rankNoteEl.textContent = "This school isn't ranked — no fresh snapshot to compute retention from.";
+  }
+
+  // roster table
+  const rosterTablesEl = document.getElementById("rosterTables"); rosterTablesEl.innerHTML = "";
+  document.getElementById("rosterNote").textContent = `${school.players.length} players tracked this snapshot`;
+  ["Gone","Returning","New"].forEach(cat=>{
+    const list = school.players.filter(p=>p.category===cat).sort((a,b)=>a.name.localeCompare(b.name));
+    if(!list.length) return;
+    const group = document.createElement("div");
+    group.className = "roster-group";
+    let rowsHtml = `<div class="roster-group-head">${cat} (${list.length})</div>
+      <div class="roster-grid">
+        <div class="row-head"><span>Player</span><span>Pos</span><span>Class</span><span>Height</span><span>Weight</span><span>Hometown</span><span>High School / Status</span></div>`;
+    list.forEach(p=>{
+      const dep = departureInfo(p);
+      const statusHtml = cat==="Gone"
+        ? `<span class="status-badge status-Gone dep-${dep.cls}" title="${escapeHtml(dep.title)}">${dep.label}</span>`
+        : `<span class="mono-cell">${escapeHtml(p.highSchool||"")}</span>`;
+      rowsHtml += `<div class="row">
+        <div class="cell-name">${escapeHtml(p.name)}</div>
+        <div class="mono-cell">${escapeHtml(p.position)}</div>
+        <div class="mono-cell">${escapeHtml(p.cls)}</div>
+        <div class="mono-cell">${escapeHtml(p.height)}</div>
+        <div class="mono-cell">${escapeHtml(p.weight)}</div>
+        <div class="mono-cell">${escapeHtml(p.hometown)}</div>
+        ${statusHtml}
+      </div>`;
+    });
+    rowsHtml += `</div>`;
+    group.innerHTML = rowsHtml;
+    rosterTablesEl.appendChild(group);
+  });
+}
+
+/* ============ school picker / routing ============ */
+function selectSchool(name){
+  const school = APP.byName.get(name.toLowerCase());
+  if(!school){
+    document.getElementById("teamContent").classList.remove("show");
+    document.getElementById("emptyState").style.display = "block";
+    document.getElementById("emptyState").innerHTML = `No school matches "<b>${escapeHtml(name)}</b>". Pick one from the list.`;
+    return;
+  }
+  const url = new URL(window.location);
+  url.searchParams.set("school", school.name);
+  window.history.replaceState({}, "", url);
+  document.getElementById("schoolSearch").value = school.name;
+  renderTeam(school, APP.schools);
+}
+
+loadData().then(data=>{
+  const schools = flattenSchools(data);
+  APP.data = data;
+  APP.schools = schools;
+  schools.forEach(s=>APP.byName.set(s.name.toLowerCase(), s));
+
+  const datalist = document.getElementById("schoolListDatalist");
+  datalist.innerHTML = schools
+    .slice().sort((a,b)=>a.name.localeCompare(b.name))
+    .map(s=>`<option value="${escapeHtml(s.name)}">${escapeHtml(s.confName)}</option>`).join("");
+
+  document.getElementById("pickerHint").textContent = `${schools.length} schools tracked`;
+
+  const input = document.getElementById("schoolSearch");
+  input.addEventListener("change", ()=>{ if(input.value.trim()) selectSchool(input.value.trim()); });
+  input.addEventListener("keydown", e=>{ if(e.key==="Enter" && input.value.trim()) selectSchool(input.value.trim()); });
+
+  const params = new URLSearchParams(window.location.search);
+  const initial = params.get("school");
+  if(initial){
+    selectSchool(initial);
+  } else {
+    document.getElementById("emptyState").innerHTML = `Type a school name above to build its profile.`;
+  }
+}).catch(err=>{
+  document.getElementById("emptyState").innerHTML = `Couldn't load roster data: ${escapeHtml(err.message)}`;
+});
+</script>
+</body>
+</html>
