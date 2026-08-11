@@ -72,8 +72,10 @@
   .cmp-row:last-child{border-bottom:none;}
   .cmp-label{font-family:var(--mono);font-size:11.5px;color:var(--chalk);text-transform:uppercase;letter-spacing:.04em;}
   .cmp-track{position:relative;height:14px;background:rgba(244,241,232,0.06);border-radius:2px;}
-  .cmp-fill{position:absolute;left:0;top:0;bottom:0;background:var(--gold);border-radius:2px;transition:width .2s;}
-  .cmp-mark{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--chalk);opacity:.6;}
+  .cmp-avg-bar{position:absolute;left:0;top:0;bottom:0;background:rgba(159,176,163,0.32);border-radius:2px;transition:width .2s;}
+  .cmp-point{position:absolute;top:50%;width:12px;height:12px;margin-left:-6px;margin-top:-6px;border-radius:50%;
+    background:var(--gold-bright);border:2px solid var(--field-dark);box-shadow:0 0 0 1px var(--gold);
+    transition:left .2s;z-index:2;}
   .cmp-values{font-family:var(--mono);font-size:11px;text-align:right;color:var(--muted);line-height:1.6;}
   .cmp-values b{color:var(--chalk);font-size:12px;}
   .delta{font-weight:700;margin-left:5px;}
@@ -81,8 +83,9 @@
   .delta.down{color:var(--rust-bright);}
   .delta.flat{color:var(--muted);}
   .cmp-legend{display:flex;gap:16px;margin-top:12px;font-family:var(--mono);font-size:10.5px;color:var(--muted);flex-wrap:wrap;}
-  .cmp-legend .swatch{width:10px;height:10px;display:inline-block;border-radius:2px;background:var(--gold);margin-right:5px;vertical-align:-1px;}
-  .cmp-legend .tick{width:2px;height:10px;display:inline-block;background:var(--chalk);opacity:.6;margin-right:5px;vertical-align:-1px;}
+  .cmp-legend .swatch{width:10px;height:10px;display:inline-block;border-radius:2px;background:rgba(159,176,163,0.55);margin-right:5px;vertical-align:-1px;}
+  .cmp-legend .dot{width:9px;height:9px;display:inline-block;border-radius:50%;background:var(--gold-bright);
+    border:2px solid var(--field-dark);box-shadow:0 0 0 1px var(--gold);margin-right:5px;vertical-align:-2px;}
 
   .index-callout{display:flex;align-items:baseline;gap:10px;margin-bottom:16px;font-family:var(--mono);}
   .index-callout .big{font-family:var(--display);font-size:38px;color:var(--gold-bright);}
@@ -206,8 +209,8 @@
         <div class="panel">
           <div id="posBars"></div>
           <div class="cmp-legend">
-            <span><span class="swatch"></span>This school</span>
-            <span><span class="tick"></span>Conference avg / school</span>
+            <span><span class="dot"></span>This school</span>
+            <span><span class="swatch"></span>Conference avg / school</span>
           </div>
         </div>
       </section>
@@ -221,8 +224,8 @@
       <div class="panel">
         <div id="sizeBars"></div>
         <div class="cmp-legend">
-          <span><span class="swatch"></span>This school</span>
-          <span><span class="tick"></span>Conference avg</span>
+          <span><span class="dot"></span>This school</span>
+          <span><span class="swatch"></span>Conference avg</span>
         </div>
       </div>
     </section>
@@ -290,21 +293,34 @@
 const CLASS_ORDER = ["Fr","R-Fr","So","R-So","Jr","R-Jr","Sr","R-Sr","Gr"];
 const CLASS_WEIGHT = {Fr:1,"R-Fr":1,So:2,"R-So":2,Jr:3,"R-Jr":3,Sr:4,"R-Sr":4,Gr:5};
 
+/* Source bios occasionally mangle this field (e.g. "62'2\"" or "59'154\"" on
+   East Texas Baptist's site) instead of a real height. Anything outside a
+   plausible human range is almost certainly a scrape artifact, not a real
+   7'11" player, so it's treated as unknown rather than skewing averages. */
 function parseHeightToInches(str){
   if(!str) return null;
   str = String(str).trim();
+  let inches = null;
   let m = str.match(/^(\d{1,2})-(\d{1,2})?$/);
-  if(m) return parseInt(m[1])*12 + (m[2] ? parseInt(m[2]) : 0);
-  m = str.match(/^(\d{1,2})['’]\s*(\d{1,2})/);
-  if(m) return parseInt(m[1])*12 + parseInt(m[2]);
-  m = str.match(/^(\d{2,3})$/);
-  if(m) return parseInt(m[1]);
-  return null;
+  if(m) inches = parseInt(m[1])*12 + (m[2] ? parseInt(m[2]) : 0);
+  if(inches == null){
+    m = str.match(/^(\d{1,2})['’]\s*(\d{1,2})/);
+    if(m) inches = parseInt(m[1])*12 + parseInt(m[2]);
+  }
+  if(inches == null){
+    m = str.match(/^(\d{2,3})$/);
+    if(m) inches = parseInt(m[1]);
+  }
+  if(inches == null || inches < 58 || inches > 86) return null;
+  return inches;
 }
 function parseWeightToLbs(str){
   if(!str) return null;
   const m = String(str).match(/(\d+)/);
-  return m ? parseInt(m[1]) : null;
+  if(!m) return null;
+  const lbs = parseInt(m[1]);
+  if(lbs < 130 || lbs > 400) return null;
+  return lbs;
 }
 function formatInches(inches){
   if(inches == null) return "&mdash;";
@@ -596,8 +612,8 @@ function renderCmpBar(container, label, schoolVal, confVal, opts={}){
   row.innerHTML = `
     <div class="cmp-label">${escapeHtml(label)}</div>
     <div class="cmp-track">
-      <div class="cmp-fill" style="width:${schoolPct}%"></div>
-      <div class="cmp-mark" style="left:${confPct}%"></div>
+      <div class="cmp-avg-bar" style="width:${confPct}%"></div>
+      <div class="cmp-point" style="left:${schoolPct}%"></div>
     </div>
     <div class="cmp-values"><b>${fmt(schoolVal)}</b> vs ${fmt(confVal)} avg ${deltaBadge(schoolVal, confVal, opts.deltaFormat || (d=>fmt(Math.abs(d))), opts.higherIsBetter)}</div>
   `;
