@@ -130,6 +130,50 @@
   .rank-note{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:12px;}
   .rank-note b{color:var(--gold-bright);}
 
+  /* roster filters */
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;}
+  .chip{font-family:var(--mono);font-size:11px;letter-spacing:0.04em;text-transform:uppercase;
+    background:transparent;border:1px solid var(--line);color:var(--muted);padding:7px 13px;border-radius:20px;cursor:pointer;transition:all .12s;}
+  .chip:hover{border-color:var(--gold);color:var(--chalk);}
+  .chip.active{background:var(--gold);border-color:var(--gold);color:var(--field-dark);font-weight:700;}
+  .filter-clear{background:none;border:1px solid var(--gold);color:var(--gold-bright);
+    font-family:var(--mono);font-size:11px;padding:7px 13px;border-radius:16px;cursor:pointer;}
+  .filter-clear:hover{background:var(--gold);color:var(--field-dark);}
+  .numeric-filter{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--muted);
+    border:1px solid var(--line);border-radius:20px;padding:4px 6px 4px 12px;}
+  .numeric-label{letter-spacing:0.04em;text-transform:uppercase;}
+  .op-select{font-family:var(--mono);font-size:11px;background:var(--field-dark);border:1px solid var(--line);
+    color:var(--chalk);padding:5px 6px;border-radius:14px;outline:none;}
+  .numeric-input{font-family:var(--mono);font-size:11px;background:var(--field-dark);border:1px solid var(--line);
+    color:var(--chalk);padding:5px 8px;border-radius:14px;outline:none;width:100px;}
+  .numeric-input:focus,.op-select:focus{border-color:var(--gold);}
+  .numeric-input::placeholder{color:var(--muted);}
+  .pos-filter{position:relative;}
+  .pos-filter-btn{font-family:var(--mono);font-size:11px;background:var(--field-dark);border:1px solid var(--line);
+    color:var(--chalk);padding:7px 14px;border-radius:20px;cursor:pointer;display:flex;align-items:center;gap:7px;}
+  .pos-filter-btn:hover{border-color:var(--gold);}
+  .pos-filter-btn::after{content:'▾';font-size:9px;color:var(--muted);}
+  .pos-panel{position:absolute;top:calc(100% + 6px);left:0;z-index:40;
+    background:var(--field-dark);border:1px solid var(--gold);border-radius:4px;
+    padding:10px 12px;width:290px;max-height:380px;overflow-y:auto;
+    box-shadow:0 10px 28px rgba(0,0,0,0.45);}
+  .pos-panel[hidden]{display:none;}
+  .pos-panel-actions{display:flex;justify-content:flex-end;margin-bottom:8px;}
+  .pos-clear-link{background:none;border:none;color:var(--gold-bright);font-family:var(--mono);
+    font-size:10.5px;cursor:pointer;text-decoration:underline;padding:0;}
+  .pos-group{margin-bottom:10px;}
+  .pos-group:last-child{margin-bottom:0;}
+  .pos-group-label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:0.06em;
+    color:var(--gold-bright);margin-bottom:4px;}
+  .pos-row{display:flex;align-items:center;gap:7px;padding:3px 2px;font-family:var(--mono);
+    font-size:12px;cursor:pointer;border-radius:2px;color:var(--chalk);}
+  .pos-row:hover{background:rgba(244,241,232,0.06);}
+  .pos-row input[type=checkbox]{accent-color:var(--gold);cursor:pointer;}
+  .pos-name{flex:1;}
+  .pos-count{color:var(--muted);font-size:10.5px;}
+  .roster-search{flex:1;min-width:200px;}
+  .roster-empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:14px 2px;}
+
   /* roster table */
   .roster-group{margin-bottom:18px;}
   .roster-group:last-child{margin-bottom:0;}
@@ -279,6 +323,45 @@
       <div class="section-head">
         <h2>Full Roster</h2>
         <div class="section-note" id="rosterNote"></div>
+      </div>
+      <div class="controls" id="rosterCategoryChips">
+        <button type="button" class="chip active" data-filter="all">All</button>
+        <button type="button" class="chip" data-filter="New">New</button>
+        <button type="button" class="chip" data-filter="Returning">Returning</button>
+        <button type="button" class="chip" data-filter="Gone">Gone</button>
+      </div>
+      <div class="controls">
+        <input class="search roster-search" id="rosterSearch" placeholder="Search name, hometown, high school…" autocomplete="off">
+        <div class="pos-filter" id="rosterPosFilterWrap">
+          <button type="button" class="pos-filter-btn" id="rosterPosBtn">All Positions</button>
+          <div class="pos-panel" id="rosterPosPanel" hidden>
+            <div class="pos-panel-actions">
+              <button type="button" class="pos-clear-link" id="rosterPosClearBtn">Clear</button>
+            </div>
+            <div id="rosterPosPanelGroups"></div>
+          </div>
+        </div>
+        <div class="numeric-filter">
+          <span class="numeric-label">Ht</span>
+          <select class="op-select" id="rosterHeightOp">
+            <option value="any">any</option>
+            <option value=">">&gt;</option>
+            <option value="<">&lt;</option>
+            <option value="=">=</option>
+          </select>
+          <input class="numeric-input" id="rosterHeightVal" placeholder="e.g. 6'2 or 74">
+        </div>
+        <div class="numeric-filter">
+          <span class="numeric-label">Wt</span>
+          <select class="op-select" id="rosterWeightOp">
+            <option value="any">any</option>
+            <option value=">">&gt;</option>
+            <option value="<">&lt;</option>
+            <option value="=">=</option>
+          </select>
+          <input class="numeric-input" id="rosterWeightVal" placeholder="e.g. 220" type="number">
+        </div>
+        <button type="button" class="filter-clear" id="rosterFilterClear" style="margin-left:auto;">Clear Filters &#10005;</button>
       </div>
       <div id="rosterTables"></div>
     </section>
@@ -746,36 +829,192 @@ function renderTeam(school, allSchools){
     rankNoteEl.textContent = "This school isn't ranked — no fresh snapshot to compute retention from.";
   }
 
-  // roster table
-  const rosterTablesEl = document.getElementById("rosterTables"); rosterTablesEl.innerHTML = "";
-  document.getElementById("rosterNote").textContent = `${school.players.length} players tracked this snapshot`;
-  ["Gone","Returning","New"].forEach(cat=>{
-    const list = school.players.filter(p=>p.category===cat).sort((a,b)=>a.name.localeCompare(b.name));
-    if(!list.length) return;
-    const group = document.createElement("div");
-    group.className = "roster-group";
-    let rowsHtml = `<div class="roster-group-head">${cat} (${list.length})</div>
-      <div class="roster-grid">
-        <div class="row-head"><span>Player</span><span>Pos</span><span>Class</span><span>Height</span><span>Weight</span><span>Hometown</span><span>High School / Status</span></div>`;
-    list.forEach(p=>{
-      const dep = departureInfo(p);
-      const statusHtml = cat==="Gone"
-        ? `<span class="status-badge status-Gone dep-${dep.cls}" title="${escapeHtml(dep.title)}">${dep.label}</span>`
-        : `<span class="mono-cell">${escapeHtml(p.highSchool||"")}</span>`;
-      rowsHtml += `<div class="row">
-        <div class="cell-name">${escapeHtml(p.name)}</div>
-        <div class="mono-cell">${escapeHtml(p.position)}</div>
-        <div class="mono-cell">${escapeHtml(p.cls)}</div>
-        <div class="mono-cell">${escapeHtml(p.height)}</div>
-        <div class="mono-cell">${escapeHtml(p.weight)}</div>
-        <div class="mono-cell">${escapeHtml(p.hometown)}</div>
-        ${statusHtml}
-      </div>`;
+  // roster table (search / category / position / height / weight filters)
+  renderRosterSection(school);
+}
+
+function rosterRowHtml(p, cat){
+  const dep = departureInfo(p);
+  const statusHtml = cat==="Gone"
+    ? `<span class="status-badge status-Gone dep-${dep.cls}" title="${escapeHtml(dep.title)}">${dep.label}</span>`
+    : `<span class="mono-cell">${escapeHtml(p.highSchool||"")}</span>`;
+  return `<div class="row">
+    <div class="cell-name">${escapeHtml(p.name)}</div>
+    <div class="mono-cell">${escapeHtml(p.position)}</div>
+    <div class="mono-cell">${escapeHtml(p.cls)}</div>
+    <div class="mono-cell">${escapeHtml(p.height)}</div>
+    <div class="mono-cell">${escapeHtml(p.weight)}</div>
+    <div class="mono-cell">${escapeHtml(p.hometown)}</div>
+    ${statusHtml}
+  </div>`;
+}
+
+function renderRosterSection(school){
+  const filter = { search:"", category:"all", positions:new Set(),
+    heightOp:"any", heightVal:null, weightOp:"any", weightVal:null };
+
+  const searchEl = document.getElementById("rosterSearch");
+  const heightOpEl = document.getElementById("rosterHeightOp");
+  const heightValEl = document.getElementById("rosterHeightVal");
+  const weightOpEl = document.getElementById("rosterWeightOp");
+  const weightValEl = document.getElementById("rosterWeightVal");
+  const posBtn = document.getElementById("rosterPosBtn");
+  const posPanel = document.getElementById("rosterPosPanel");
+  const posPanelGroups = document.getElementById("rosterPosPanelGroups");
+  const rosterTablesEl = document.getElementById("rosterTables");
+  const rosterNoteEl = document.getElementById("rosterNote");
+
+  searchEl.value = "";
+  heightOpEl.value = "any"; heightValEl.value = "";
+  weightOpEl.value = "any"; weightValEl.value = "";
+  document.querySelectorAll('#rosterCategoryChips .chip').forEach(c=>c.classList.toggle('active', c.dataset.filter==='all'));
+
+  /* position checkbox panel, built once per school from that school's own positions */
+  const keyCounts = {};
+  school.players.forEach(p=>{ const key=(p.position||"").toUpperCase().trim(); if(key) keyCounts[key]=(keyCounts[key]||0)+1; });
+  const entries = Object.keys(keyCounts).map(pos=>({pos, count:keyCounts[pos], ...classifyPosition(pos)}));
+  const posGroups = {Offense:[], Defense:[], "Special Teams":[], Other:[]};
+  entries.forEach(e=>posGroups[e.category].push(e));
+  Object.values(posGroups).forEach(list=>list.sort((a,b)=>a.rank-b.rank || a.pos.localeCompare(b.pos)));
+
+  posPanelGroups.innerHTML = POSITION_GROUPS.map(cat=>{
+    if(!posGroups[cat].length) return "";
+    return `<div class="pos-group">
+      <div class="pos-group-label">${cat}</div>
+      ${posGroups[cat].map(e=>`
+        <label class="pos-row">
+          <input type="checkbox" data-pos="${escapeHtml(e.pos)}">
+          <span class="pos-name">${escapeHtml(e.pos)}</span>
+          <span class="pos-count" data-pos-count="${escapeHtml(e.pos)}">(${e.count})</span>
+        </label>`).join("")}
+    </div>`;
+  }).join("");
+
+  const posRowEls = {}, posCountEls = {};
+  posPanelGroups.querySelectorAll('.pos-row').forEach(row=>{
+    const cb = row.querySelector('input[type=checkbox]');
+    const pos = cb.dataset.pos;
+    posRowEls[pos] = row;
+    posCountEls[pos] = row.querySelector('.pos-count');
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) filter.positions.add(pos); else filter.positions.delete(pos);
+      updatePosBtnLabel();
+      draw();
     });
-    rowsHtml += `</div>`;
-    group.innerHTML = rowsHtml;
-    rosterTablesEl.appendChild(group);
   });
+  const posGroupEls = [...posPanelGroups.querySelectorAll('.pos-group')];
+
+  function updatePosBtnLabel(){
+    posBtn.textContent = filter.positions.size===0 ? "All Positions"
+      : filter.positions.size===1 ? [...filter.positions][0]
+      : `${filter.positions.size} Positions`;
+  }
+
+  posBtn.onclick = (e)=>{ e.stopPropagation(); posPanel.hidden = !posPanel.hidden; };
+  document.getElementById("rosterPosClearBtn").onclick = ()=>{
+    filter.positions.clear();
+    posPanelGroups.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=false);
+    updatePosBtnLabel();
+    draw();
+  };
+
+  document.querySelectorAll('#rosterCategoryChips .chip').forEach(chip=>{
+    chip.onclick = ()=>{
+      document.querySelectorAll('#rosterCategoryChips .chip').forEach(c=>c.classList.remove('active'));
+      chip.classList.add('active');
+      filter.category = chip.dataset.filter;
+      draw();
+    };
+  });
+  searchEl.oninput = ()=>{ filter.search = searchEl.value; draw(); };
+  heightOpEl.onchange = ()=>{ filter.heightOp = heightOpEl.value; draw(); };
+  heightValEl.oninput = ()=>{ filter.heightVal = parseHeightToInches(heightValEl.value); draw(); };
+  weightOpEl.onchange = ()=>{ filter.weightOp = weightOpEl.value; draw(); };
+  weightValEl.oninput = ()=>{ filter.weightVal = weightValEl.value ? parseInt(weightValEl.value) : null; draw(); };
+  document.getElementById("rosterFilterClear").onclick = ()=>{
+    filter.search = ""; filter.category = "all"; filter.positions.clear();
+    filter.heightOp = "any"; filter.heightVal = null; filter.weightOp = "any"; filter.weightVal = null;
+    searchEl.value = ""; heightOpEl.value = "any"; heightValEl.value = ""; weightOpEl.value = "any"; weightValEl.value = "";
+    document.querySelectorAll('#rosterCategoryChips .chip').forEach(c=>c.classList.toggle('active', c.dataset.filter==='all'));
+    posPanelGroups.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=false);
+    updatePosBtnLabel();
+    draw();
+  };
+
+  /* everything except the position filter - reused for the live per-position counts too */
+  function nonPositionFiltered(){
+    const search = filter.search.trim().toLowerCase();
+    return school.players.filter(p=>{
+      if(filter.category!=="all" && p.category!==filter.category) return false;
+      if(search){
+        const hay = `${p.name} ${p.hometown||""} ${p.highSchool||""}`.toLowerCase();
+        if(!hay.includes(search)) return false;
+      }
+      if(filter.heightOp!=="any"){
+        const hIn = parseHeightToInches(p.height);
+        if(hIn==null || filter.heightVal==null) return false;
+        if(filter.heightOp===">" && !(hIn>filter.heightVal)) return false;
+        if(filter.heightOp==="<" && !(hIn<filter.heightVal)) return false;
+        if(filter.heightOp==="=" && !(hIn===filter.heightVal)) return false;
+      }
+      if(filter.weightOp!=="any"){
+        const wLb = parseWeightToLbs(p.weight);
+        if(wLb==null || filter.weightVal==null) return false;
+        if(filter.weightOp===">" && !(wLb>filter.weightVal)) return false;
+        if(filter.weightOp==="<" && !(wLb<filter.weightVal)) return false;
+        if(filter.weightOp==="=" && !(wLb===filter.weightVal)) return false;
+      }
+      return true;
+    });
+  }
+
+  function updatePositionCounts(baseList){
+    const counts = {};
+    baseList.forEach(p=>{ const key=(p.position||"").toUpperCase().trim(); if(key) counts[key]=(counts[key]||0)+1; });
+    Object.keys(posRowEls).forEach(pos=>{
+      const n = counts[pos] || 0;
+      const show = n>0 || filter.positions.has(pos);
+      posRowEls[pos].style.display = show ? "" : "none";
+      if(show) posCountEls[pos].textContent = n>0 ? `(${n})` : "";
+    });
+    posGroupEls.forEach(g=>{
+      const anyVisible = [...g.querySelectorAll('.pos-row')].some(r=>r.style.display!=="none");
+      g.style.display = anyVisible ? "" : "none";
+    });
+  }
+
+  function draw(){
+    const base = nonPositionFiltered();
+    updatePositionCounts(base);
+    const list = filter.positions.size===0
+      ? base
+      : base.filter(p=>filter.positions.has((p.position||"").toUpperCase().trim()));
+
+    rosterNoteEl.textContent = `${list.length} of ${school.players.length} players`;
+
+    rosterTablesEl.innerHTML = "";
+    const cats = filter.category==="all" ? ["Gone","Returning","New"] : [filter.category];
+    let rendered = false;
+    cats.forEach(cat=>{
+      const catList = list.filter(p=>p.category===cat).sort((a,b)=>a.name.localeCompare(b.name));
+      if(!catList.length) return;
+      rendered = true;
+      const group = document.createElement("div");
+      group.className = "roster-group";
+      let rowsHtml = `<div class="roster-group-head">${cat} (${catList.length})</div>
+        <div class="roster-grid">
+          <div class="row-head"><span>Player</span><span>Pos</span><span>Class</span><span>Height</span><span>Weight</span><span>Hometown</span><span>High School / Status</span></div>`;
+      catList.forEach(p=>{ rowsHtml += rosterRowHtml(p, cat); });
+      rowsHtml += `</div>`;
+      group.innerHTML = rowsHtml;
+      rosterTablesEl.appendChild(group);
+    });
+    if(!rendered){
+      rosterTablesEl.innerHTML = `<div class="roster-empty">No players match the current filters.</div>`;
+    }
+  }
+
+  draw();
 }
 
 /* ============ school picker / routing ============ */
@@ -793,6 +1032,12 @@ function selectSchool(name){
   document.getElementById("schoolSearch").value = school.name;
   renderTeam(school, APP.schools);
 }
+
+document.addEventListener('click', (e)=>{
+  const wrap = document.getElementById('rosterPosFilterWrap');
+  const panel = document.getElementById('rosterPosPanel');
+  if(wrap && panel && !wrap.contains(e.target)) panel.hidden = true;
+});
 
 loadData().then(data=>{
   const schools = flattenSchools(data);
