@@ -266,7 +266,13 @@
 
     renderTable(document.getElementById("school-roster"), [
       { label: "Name", key: "name" },
+      { label: "#", key: "jersey", num: true },
+      { label: "Pos", key: "position" },
       { label: "Class", key: "cls" },
+      { label: "Ht", key: "height" },
+      { label: "Wt", key: "weight", num: true },
+      { label: "Hometown", key: "hometown" },
+      { label: "High School", key: "highSchool" },
       { label: "Category", key: "category", render: function (p) { return esc(displayCategory(p.category)); } }
     ], school.players, { caption: "Roster (" + school.players.length + " players)" });
   }
