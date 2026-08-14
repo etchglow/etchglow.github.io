@@ -330,6 +330,7 @@
       </div>
       <div class="controls" id="rosterCategoryChips">
         <button type="button" class="chip active" data-filter="all">All</button>
+        <button type="button" class="chip" data-filter="current">Current Roster</button>
         <button type="button" class="chip" data-filter="New">New</button>
         <button type="button" class="chip" data-filter="Returning">Returning</button>
         <button type="button" class="chip" data-filter="Gone">Gone</button>
@@ -440,6 +441,13 @@ const OFFENSE_ORDER = ["QB","RB","FB","HB","TB","WR","SL","SLOT","SB","H","TE","
 const DEFENSE_ORDER = ["DL","DE","DT","NT","EDGE","LB","OLB","ILB","MLB","SPUR","STAR","BANDIT","DB","CB","NB","S","FS","SS","SAF","ROV"];
 const ST_ORDER = ["K","PK","P","LS","SPEC"];
 const POSITION_GROUPS = ["Offense","Defense","Special Teams","Other"];
+
+/* Individual line spots that should collapse into a single "OL" filter option
+   rather than each getting their own checkbox. */
+const OL_ALIASES = new Set(["LT","RT","LG","RG","OG","T","C"]);
+function positionFilterKey(key){
+  return OL_ALIASES.has(key) ? "OL" : key;
+}
 
 function classifyPosition(raw){
   if(!raw) return {category:"Other", rank:999};
@@ -896,7 +904,7 @@ function renderRosterSection(school){
 
   /* position checkbox panel, built once per school from that school's own positions */
   const keyCounts = {};
-  school.players.forEach(p=>{ const key=(p.position||"").toUpperCase().trim(); if(key) keyCounts[key]=(keyCounts[key]||0)+1; });
+  school.players.forEach(p=>{ const key=positionFilterKey((p.position||"").toUpperCase().trim()); if(key) keyCounts[key]=(keyCounts[key]||0)+1; });
   const entries = Object.keys(keyCounts).map(pos=>({pos, count:keyCounts[pos], ...classifyPosition(pos)}));
   const posGroups = {Offense:[], Defense:[], "Special Teams":[], Other:[]};
   entries.forEach(e=>posGroups[e.category].push(e));
@@ -979,7 +987,8 @@ function renderRosterSection(school){
   function nonPositionFiltered(){
     const search = filter.search.trim().toLowerCase();
     return school.players.filter(p=>{
-      if(filter.category!=="all" && p.category!==filter.category) return false;
+      if(filter.category==="current"){ if(p.category==="Gone") return false; }
+      else if(filter.category!=="all" && p.category!==filter.category) return false;
       if(search){
         const hay = `${p.name} ${p.hometown||""} ${p.highSchool||""}`.toLowerCase();
         if(!hay.includes(search)) return false;
@@ -1004,7 +1013,7 @@ function renderRosterSection(school){
 
   function updatePositionCounts(baseList){
     const counts = {};
-    baseList.forEach(p=>{ const key=(p.position||"").toUpperCase().trim(); if(key) counts[key]=(counts[key]||0)+1; });
+    baseList.forEach(p=>{ const key=positionFilterKey((p.position||"").toUpperCase().trim()); if(key) counts[key]=(counts[key]||0)+1; });
     Object.keys(posRowEls).forEach(pos=>{
       const n = counts[pos] || 0;
       const show = n>0 || filter.positions.has(pos);
@@ -1022,12 +1031,14 @@ function renderRosterSection(school){
     updatePositionCounts(base);
     const list = filter.positions.size===0
       ? base
-      : base.filter(p=>filter.positions.has((p.position||"").toUpperCase().trim()));
+      : base.filter(p=>filter.positions.has(positionFilterKey((p.position||"").toUpperCase().trim())));
 
     rosterNoteEl.textContent = `${list.length} of ${school.players.length} players`;
 
     rosterTablesEl.innerHTML = "";
-    const cats = filter.category==="all" ? ["Gone","Returning","New"] : [filter.category];
+    const cats = filter.category==="all" ? ["Gone","Returning","New"]
+      : filter.category==="current" ? ["Returning","New"]
+      : [filter.category];
     let rendered = false;
     cats.forEach(cat=>{
       const catList = list.filter(p=>p.category===cat).sort((a,b)=>{
