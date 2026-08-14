@@ -21,6 +21,12 @@
   .crumb{color:var(--muted);cursor:pointer;text-decoration:none;font-family:var(--mono);font-size:12px;}
   .crumb:hover{color:var(--gold-bright);}
 
+  .site-nav{display:flex;gap:6px;margin-bottom:18px;font-family:var(--mono);flex-wrap:wrap;}
+  .site-nav-link{color:var(--muted);text-decoration:none;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    padding:6px 13px;border:1px solid var(--line);border-radius:16px;transition:all .12s;}
+  .site-nav-link:hover{color:var(--chalk);border-color:var(--gold);}
+  .site-nav-link.active{background:var(--gold);border-color:var(--gold);color:var(--field-dark);font-weight:700;}
+
   .picker-bar{
     display:flex;align-items:center;gap:12px;flex-wrap:wrap;
     background:rgba(244,241,232,0.03);border:1px solid var(--line);border-radius:2px;
@@ -198,6 +204,9 @@
   .status-Gone.dep-graduated{background:rgba(122,147,166,0.22);color:#9DB8C9;}
   .status-Gone.dep-other{background:rgba(178,74,58,0.12);color:var(--stale);}
   .status-badge[title]{cursor:help;}
+  .origin-badge{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;
+    padding:2px 6px;border-radius:9px;display:inline-block;white-space:nowrap;cursor:help;
+    background:rgba(122,147,166,0.18);color:#9DB8C9;}
   @media (max-width:720px){
     .row-head,.row{grid-template-columns:1.3fr 0.5fr 0.8fr 1.3fr;}
     .row-head>*:nth-child(4),.row>*:nth-child(4),
@@ -213,7 +222,11 @@
 <body>
 <div class="wrap">
 
-  <a class="crumb" href="index.html">&larr; Dashboard</a>
+  <div class="site-nav">
+    <a href="index.html" class="site-nav-link">Dashboard</a>
+    <a href="team.html" class="site-nav-link active">Team Profile</a>
+    <a href="transfer-portal.html" class="site-nav-link">Transfer Portal</a>
+  </div>
 
   <div class="picker-bar">
     <span class="picker-label">Team Profile</span>
@@ -500,6 +513,107 @@ function departureInfo(p){
   return {label:"Gone", cls:"other", title:"Departure reason not available for this snapshot."};
 }
 
+/* ============ non-D3 origin matching ============ */
+const JUCO_DIVISIONS = new Set(["NJCAA","CCCAA","NWAC"]);
+const DIVISION_LABEL = {
+  "D1-FBS":"D1 (FBS)", "D1-FCS":"D1 (FCS)", "D2":"D2",
+  "NAIA":"NAIA", "NJCAA":"NJCAA", "CCCAA":"CCCAA", "NWAC":"NWAC"
+};
+
+function normalizeSchoolText(s){
+  return String(s||"")
+    .toLowerCase()
+    .replace(/&/g," and ")
+    .replace(/[.’']/g,"")
+    .replace(/^\s*the\s+/,"")
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+}
+
+async function loadNonD3Schools(){
+  try{
+    const res = await fetch('https://etchglow.github.io/non-d3-football-schools.json', {cache:"no-store"});
+    if(!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.schools) ? data.schools : [];
+  }catch(e){ return []; }
+}
+
+/* Every school gets its full name indexed, plus one mechanical variant with a trailing
+   "University"/"College" stripped ("North Dakota State University" -> also indexes "North
+   Dakota State"), since bios commonly drop that suffix. This is a deterministic transform, not
+   a hand-authored abbreviation guess - it won't catch a state-system short form like
+   "UW-Whitewater", only a suffix drop. */
+function addSchoolAliases(map, name, entry){
+  const add = (variant) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
+  add(name);
+  const stripped = name.replace(/\s+(university|college)\s*$/i, "").trim();
+  if(stripped && stripped.toLowerCase() !== name.toLowerCase()) add(stripped);
+}
+
+/* Juco names additionally get "X CC" / "X JC" / "X Community College" variants, since roster
+   bios abbreviate juco names far more inconsistently than four-year schools. */
+function buildNonD3Index(schools){
+  const map = new Map();
+  const add = (variant, entry) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
+  schools.forEach(s=>{
+    const entry = {name:s.name, division:s.division};
+    addSchoolAliases(map, s.name, entry);
+    if(JUCO_DIVISIONS.has(s.division)){
+      const base = s.name.replace(/\s+(community college|junior college|college)\s*$/i, "").trim();
+      if(base && base.toLowerCase() !== s.name.toLowerCase()){
+        add(base, entry);
+        add(base + " CC", entry);
+        add(base + " JC", entry);
+        add(base + " Community College", entry);
+        add(base + " College", entry);
+      }
+    }
+  });
+  return map;
+}
+
+function buildD3Index(schools){
+  const map = new Map();
+  schools.forEach(s=> addSchoolAliases(map, s.name, {name:s.name, confName:s.confName}));
+  return map;
+}
+
+/* Prefers the dedicated previousSchool field (see PlayerEntry.PreviousSchool - only populated
+   for snapshots scraped after that field was added). Older snapshots and the one Presto2
+   template that can't distinguish "High School" from "Previous School" by column label alone
+   fall back to pulling a candidate out of the free-text highSchool field: sites that embed a
+   prior college there use "HS (Prev)" or "HS / Prev", so only those two positions - plus the
+   whole field as a last resort - are tried, and matching is always exact-normalized against
+   the known-school index rather than a loose substring, so "Boston College HS" can't
+   false-positive against "Boston College". */
+function previousSchoolCandidates(p){
+  if(p.previousSchool && p.previousSchool.trim()) return [p.previousSchool.trim()];
+  const text = String(p.highSchool||"").trim();
+  if(!text) return [];
+  const candidates = [];
+  const parenMatch = text.match(/\(([^)]+)\)\s*$/);
+  if(parenMatch) candidates.push(parenMatch[1].trim());
+  if(text.includes("/")){
+    const parts = text.split("/");
+    candidates.push(parts[parts.length-1].trim());
+  }
+  candidates.push(text);
+  return candidates;
+}
+
+function classifyOrigin(p, nonD3Index, d3Index){
+  for(const candidate of previousSchoolCandidates(p)){
+    if(!candidate) continue;
+    const n = normalizeSchoolText(candidate);
+    const d3Hit = d3Index.get(n);
+    if(d3Hit) return {text:candidate, matchedName:d3Hit.name, matchedConf:d3Hit.confName, scope:"d3", division:null};
+    const hit = nonD3Index.get(n);
+    if(hit) return {text:candidate, matchedName:hit.name, matchedConf:null, scope:"non-d3", division:hit.division};
+  }
+  return null;
+}
+
 /* ============ hometown -> state/region normalization ============ */
 const LOCATION_MAP = (() => {
   const m = {};
@@ -592,7 +706,7 @@ function flattenSchools(data){
   return list;
 }
 
-const APP = { data:null, schools:[], byName:new Map() };
+const APP = { data:null, schools:[], byName:new Map(), nonD3Index:new Map(), d3Index:new Map() };
 
 /* ============ per-school metric computations ============ */
 function currentRoster(school){
@@ -867,9 +981,17 @@ function renderTeam(school, allSchools){
 
 function rosterRowHtml(p, cat){
   const dep = departureInfo(p);
-  const statusHtml = cat==="Gone"
-    ? `<span class="status-badge status-Gone dep-${dep.cls}" title="${escapeHtml(dep.title)}">${dep.label}</span>`
-    : `<span class="mono-cell">${escapeHtml(p.highSchool||"")}</span>`;
+  let statusHtml;
+  if(cat==="Gone"){
+    statusHtml = `<span class="status-badge status-Gone dep-${dep.cls}" title="${escapeHtml(dep.title)}">${dep.label}</span>`;
+  } else {
+    const displayText = p.highSchool || p.previousSchool || "";
+    const origin = classifyOrigin(p, APP.nonD3Index, APP.d3Index);
+    const originBadge = origin && origin.scope==="non-d3"
+      ? ` <span class="origin-badge" title="${escapeHtml(origin.matchedName + " — best-effort match, not confirmed")}">${escapeHtml(DIVISION_LABEL[origin.division])}</span>`
+      : '';
+    statusHtml = `<span class="mono-cell">${escapeHtml(displayText)}${originBadge}</span>`;
+  }
   return `<div class="row">
     <div class="cell-name">${escapeHtml(p.name)}</div>
     <div class="mono-cell">${escapeHtml(p.position)}</div>
@@ -1094,11 +1216,13 @@ document.addEventListener('click', (e)=>{
   if(wrap && panel && !wrap.contains(e.target)) panel.hidden = true;
 });
 
-loadData().then(data=>{
+Promise.all([loadData(), loadNonD3Schools()]).then(([data, nonD3Schools])=>{
   const schools = flattenSchools(data);
   APP.data = data;
   APP.schools = schools;
   schools.forEach(s=>APP.byName.set(s.name.toLowerCase(), s));
+  APP.nonD3Index = buildNonD3Index(nonD3Schools);
+  APP.d3Index = buildD3Index(schools);
 
   const datalist = document.getElementById("schoolListDatalist");
   datalist.innerHTML = schools

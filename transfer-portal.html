@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Transfer Portal · D3 Roster Movement</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --field:#0F2E22; --field-dark:#0A2118; --chalk:#F4F1E8;
+    --gold:#C9A227; --gold-bright:#E4BE3F; --rust:#B24A3A; --rust-bright:#D15F4C;
+    --line:rgba(244,241,232,0.14); --muted:#9FB0A3; --stale:#5C6B62;
+    --display:'Anton',sans-serif; --body:'IBM Plex Sans',sans-serif; --mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--field);color:var(--chalk);font-family:var(--body);
+    background-image:repeating-linear-gradient(90deg,transparent,transparent 78px,rgba(244,241,232,0.035) 78px,rgba(244,241,232,0.035) 80px);}
+  .wrap{max-width:1180px;margin:0 auto;padding:36px 28px 80px;}
+
+  .site-nav{display:flex;gap:6px;margin-bottom:22px;font-family:var(--mono);flex-wrap:wrap;}
+  .site-nav-link{color:var(--muted);text-decoration:none;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    padding:6px 13px;border:1px solid var(--line);border-radius:16px;transition:all .12s;}
+  .site-nav-link:hover{color:var(--chalk);border-color:var(--gold);}
+  .site-nav-link.active{background:var(--gold);border-color:var(--gold);color:var(--field-dark);font-weight:700;}
+
+  .hero{border-bottom:1px solid var(--line);padding-bottom:26px;margin-bottom:34px;}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:var(--gold-bright);margin-bottom:10px;}
+  h1{font-family:var(--display);font-size:clamp(32px,5.5vw,58px);letter-spacing:0.01em;line-height:0.95;margin:0 0 12px;text-transform:uppercase;}
+  h1 span{color:var(--gold-bright);}
+  .sub{color:var(--muted);font-size:14px;max-width:720px;line-height:1.55;}
+  .stat-row{display:flex;flex-wrap:wrap;margin-top:22px;border-top:1px solid var(--line);}
+  .stat{flex:1;min-width:120px;padding:14px 18px 0 0;border-right:1px solid var(--line);}
+  .stat:last-child{border-right:none;}
+  .stat .n{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--gold-bright);}
+  .stat .n.rust{color:var(--rust-bright);}
+  .stat .n.muted{color:var(--muted);}
+  .stat .l{font-size:10.5px;letter-spacing:0.07em;text-transform:uppercase;color:var(--muted);margin-top:2px;}
+
+  .data-note{
+    display:flex;align-items:flex-start;gap:8px;margin-top:16px;
+    font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.6;
+    background:rgba(92,107,98,0.12);border:1px solid rgba(92,107,98,0.3);
+    padding:10px 13px;border-radius:2px;
+  }
+  .data-note b{color:var(--chalk);}
+
+  section{margin-bottom:52px;}
+  .section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px;}
+  h2{font-family:var(--display);font-size:22px;text-transform:uppercase;letter-spacing:0.03em;margin:0;}
+  .section-note{color:var(--muted);font-size:13px;font-family:var(--mono);max-width:420px;text-align:right;}
+  .panel{background:rgba(244,241,232,0.03);border:1px solid var(--line);border-radius:2px;padding:20px;}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media (max-width:760px){.two-col{grid-template-columns:1fr;}}
+
+  .empty-note{font-family:var(--mono);font-size:13px;color:var(--muted);padding:20px 0;}
+
+  /* magnitude bars (conference pair flows) */
+  .geo-row{display:grid;grid-template-columns:230px 1fr 46px;gap:12px;align-items:center;padding:7px 0;}
+  .geo-label{font-family:var(--mono);font-size:12px;color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .geo-label .within-tag{color:var(--muted);font-size:10px;margin-left:6px;}
+  .geo-track{height:11px;background:rgba(244,241,232,0.06);border-radius:2px;overflow:hidden;}
+  .geo-fill{height:100%;background:var(--gold);}
+  .geo-count{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;}
+  @media (max-width:640px){.geo-row{grid-template-columns:130px 1fr 34px;}}
+
+  /* confirmed transfer log */
+  .event-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;}
+  .event-row:last-child{border-bottom:none;}
+  .event-who{font-weight:600;}
+  .event-who .pos{color:var(--muted);font-family:var(--mono);font-size:11px;font-weight:400;margin-left:6px;}
+  .event-path{font-family:var(--mono);font-size:11.5px;color:var(--muted);text-align:right;white-space:nowrap;}
+  .event-path b{color:var(--chalk);}
+  .log-divider{border-top:1px solid var(--line);margin:18px 0 14px;padding-top:16px;}
+  .log-title{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px;}
+
+  /* diverging net-margin bars */
+  .net-row{display:grid;grid-template-columns:190px 1fr 56px;gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);}
+  .net-row:last-child{border-bottom:none;}
+  .net-row.clickable{cursor:pointer;}
+  .net-row.clickable:hover .net-label{color:var(--gold-bright);}
+  .net-label{font-family:var(--mono);font-size:12px;color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .12s;}
+  .net-track{position:relative;height:12px;background:rgba(244,241,232,0.05);border-radius:2px;}
+  .net-zero{position:absolute;left:50%;top:-3px;bottom:-3px;width:1px;background:var(--line);}
+  .net-fill{position:absolute;top:0;bottom:0;border-radius:2px;}
+  .net-fill.pos{background:var(--gold);left:50%;}
+  .net-fill.neg{background:var(--rust);right:50%;}
+  .net-value{font-family:var(--mono);font-size:12px;text-align:right;font-weight:700;}
+  .net-value.pos{color:var(--gold-bright);}
+  .net-value.neg{color:var(--rust-bright);}
+  .net-value.flat{color:var(--muted);}
+  .net-cap-note{font-family:var(--mono);font-size:11px;color:var(--stale);margin-top:10px;}
+  @media (max-width:640px){.net-row{grid-template-columns:110px 1fr 40px;}}
+
+  /* D3 bar charts */
+  .axis path,.axis line{stroke:var(--line);}
+  .axis text{fill:var(--muted);font-family:var(--mono);font-size:10px;}
+  #tooltip{position:absolute;pointer-events:none;background:var(--field-dark);border:1px solid var(--gold);
+    padding:8px 11px;font-family:var(--mono);font-size:12px;border-radius:2px;opacity:0;transition:opacity .1s;z-index:30;max-width:220px;}
+  /* activity table */
+  .standing-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .standing-table th{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);}
+  .standing-table th.num,.standing-table td.num{text-align:right;font-family:var(--mono);}
+  .standing-table td{padding:7px 10px;border-bottom:1px solid var(--line);}
+  .standing-table tr:last-child td{border-bottom:none;}
+  .standing-table tr:hover td{background:rgba(244,241,232,0.03);}
+
+  /* controls (search / chips / position filter) */
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;}
+  .chip{font-family:var(--mono);font-size:11px;letter-spacing:0.04em;text-transform:uppercase;
+    background:transparent;border:1px solid var(--line);color:var(--muted);padding:7px 13px;border-radius:20px;cursor:pointer;transition:all .12s;}
+  .chip:hover{border-color:var(--gold);color:var(--chalk);}
+  .chip.active{background:var(--gold);border-color:var(--gold);color:var(--field-dark);font-weight:700;}
+  .filter-clear{background:none;border:1px solid var(--gold);color:var(--gold-bright);
+    font-family:var(--mono);font-size:11px;padding:7px 13px;border-radius:16px;cursor:pointer;}
+  .filter-clear:hover{background:var(--gold);color:var(--field-dark);}
+  .search{font-family:var(--mono);font-size:12px;background:var(--field-dark);border:1px solid var(--line);
+    color:var(--chalk);padding:7px 12px;border-radius:20px;flex:1;min-width:180px;outline:none;}
+  .search::placeholder{color:var(--muted);}
+  .search:focus{border-color:var(--gold);}
+  select.school-select{font-family:var(--mono);font-size:11px;background:var(--field-dark);border:1px solid var(--line);
+    color:var(--chalk);padding:7px 12px;border-radius:20px;outline:none;max-width:220px;}
+
+  .pos-filter{position:relative;}
+  .pos-filter-btn{font-family:var(--mono);font-size:11px;background:var(--field-dark);border:1px solid var(--line);
+    color:var(--chalk);padding:7px 14px;border-radius:20px;cursor:pointer;display:flex;align-items:center;gap:7px;}
+  .pos-filter-btn:hover{border-color:var(--gold);}
+  .pos-filter-btn::after{content:'▾';font-size:9px;color:var(--muted);}
+  .pos-panel{position:absolute;top:calc(100% + 6px);left:0;z-index:40;
+    background:var(--field-dark);border:1px solid var(--gold);border-radius:4px;
+    padding:10px 12px;width:290px;max-height:380px;overflow-y:auto;
+    box-shadow:0 10px 28px rgba(0,0,0,0.45);}
+  .pos-panel[hidden]{display:none;}
+  .pos-panel-actions{display:flex;justify-content:flex-end;margin-bottom:8px;}
+  .pos-clear-link{background:none;border:none;color:var(--gold-bright);font-family:var(--mono);
+    font-size:10.5px;cursor:pointer;text-decoration:underline;padding:0;}
+  .pos-group{margin-bottom:10px;}
+  .pos-group:last-child{margin-bottom:0;}
+  .pos-group-label{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:0.06em;
+    color:var(--gold-bright);margin-bottom:4px;}
+  .pos-row{display:flex;align-items:center;gap:7px;padding:3px 2px;font-family:var(--mono);
+    font-size:12px;cursor:pointer;border-radius:2px;color:var(--chalk);}
+  .pos-row:hover{background:rgba(244,241,232,0.06);}
+  .pos-row input[type=checkbox]{accent-color:var(--gold);cursor:pointer;}
+  .pos-name{flex:1;}
+  .pos-count{color:var(--muted);font-size:10.5px;}
+
+  /* transfer list table */
+  .roster-grid{display:grid;grid-template-columns:1fr;gap:1px;background:var(--line);border:1px solid var(--line);}
+  .row-head,.row{display:grid;grid-template-columns:1.5fr 0.6fr 0.6fr 1.4fr 1fr 1.4fr;align-items:center;background:var(--field);}
+  .row-head{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);padding:10px 14px;background:rgba(244,241,232,0.04);}
+  .row-head span{cursor:pointer;user-select:none;display:flex;align-items:center;gap:5px;transition:color .12s;}
+  .row-head span:hover{color:var(--chalk);}
+  .row-head span.sorted{color:var(--gold-bright);}
+  .sort-arrow{font-size:9px;opacity:0.8;}
+  .row{padding:10px 14px;font-size:13px;}
+  .row:hover{background:rgba(244,241,232,0.05);}
+  .cell-name{font-weight:600;}
+  .mono-cell{font-family:var(--mono);font-size:12px;color:var(--muted);}
+  .list-empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:16px 4px;}
+  .origin-badge{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;
+    padding:2px 6px;border-radius:9px;display:inline-block;white-space:nowrap;cursor:help;
+    background:rgba(122,147,166,0.18);color:#9DB8C9;}
+
+  footer{color:var(--muted);font-family:var(--mono);font-size:11px;text-align:center;padding-top:20px;border-top:1px solid var(--line);}
+
+  @media (max-width:720px){
+    .section-note{text-align:left;max-width:100%;}
+    .row-head,.row{grid-template-columns:1.3fr 0.5fr 1.2fr 1.2fr;}
+    .row-head>*:nth-child(3),.row>*:nth-child(3),
+    .row-head>*:nth-child(5),.row>*:nth-child(5){display:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="site-nav">
+    <a href="index.html" class="site-nav-link">Dashboard</a>
+    <a href="team.html" class="site-nav-link">Team Profile</a>
+    <a href="transfer-portal.html" class="site-nav-link active">Transfer Portal</a>
+  </div>
+
+  <div class="hero">
+    <div class="eyebrow">NCAA Division III Football · Roster Intelligence</div>
+    <h1>Transfer <span>Portal</span></h1>
+    <div class="sub">Confirmed player movement between D3 football programs — a transfer counts here when either the departing player's name is matched to another tracked school's roster in the same scrape, or an incoming player's own bio names their previous D3 school directly. This snapshot only — not a season-long portal tracker.</div>
+    <div class="stat-row" id="statRow"></div>
+    <div class="data-note" id="dataNote"></div>
+  </div>
+
+  <section>
+    <div class="section-head">
+      <h2>Conference-to-Conference Flow</h2>
+      <div class="section-note">Confirmed transfers only &mdash; via name cross-reference or the incoming player's own bio</div>
+    </div>
+    <div class="panel">
+      <div id="confFlowBars"></div>
+      <div id="confirmedLog"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Incoming From Outside D3</h2>
+      <div class="section-note">Best-effort text match against a master list of D1/D2/NAIA/NJCAA/CCCAA/NWAC programs &mdash; not confirmed, and only catches sites that expose a transfer's previous school</div>
+    </div>
+    <div class="panel">
+      <div class="log-title" id="nonD3Count"></div>
+      <div id="nonD3DivisionBars"></div>
+    </div>
+    <div class="controls" id="nonD3DivisionChips" style="margin-top:16px;">
+      <button type="button" class="chip active" data-division="all">All Levels</button>
+    </div>
+    <div class="controls">
+      <input class="search" id="nonD3Search" placeholder="Search player, school, previous school…" autocomplete="off">
+      <select class="school-select" id="nonD3ConfFilter"></select>
+      <button type="button" class="filter-clear" id="nonD3FilterClear" style="margin-left:auto;">Clear Filters &#10005;</button>
+    </div>
+    <div class="roster-grid" id="nonD3ListGrid">
+      <div class="row-head">
+        <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
+        <span data-sort="school">School</span><span data-sort="confName">Conf.</span>
+        <span data-sort="division">Previous School</span>
+      </div>
+      <div id="nonD3ListBody"></div>
+    </div>
+  </section>
+
+  <div class="two-col">
+    <section>
+      <div class="section-head">
+        <h2>Net Margin &middot; Conferences</h2>
+        <div class="section-note">Confirmed transfers in minus out</div>
+      </div>
+      <div class="panel">
+        <div id="netConfBars"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Net Margin &middot; Schools</h2>
+        <div class="section-note">Confirmed transfers in minus out &middot; click a school for its profile</div>
+      </div>
+      <div class="panel">
+        <div id="netSchoolBars"></div>
+        <div class="net-cap-note" id="netSchoolCapNote"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="two-col">
+    <section>
+      <div class="section-head">
+        <h2>Transfer Volume by Position</h2>
+        <div class="section-note">Confirmed transfers only</div>
+      </div>
+      <div class="panel">
+        <div id="posVolumeChart"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Transfer Volume by Class Year</h2>
+        <div class="section-note">Confirmed transfers only, by class at time of departure</div>
+      </div>
+      <div class="panel">
+        <div id="classVolumeChart"></div>
+      </div>
+    </section>
+  </div>
+
+  <section>
+    <div class="section-head">
+      <h2>Conference Transfer Activity</h2>
+      <div class="section-note">Sorted by confirmed transfers out</div>
+    </div>
+    <div class="panel">
+      <table class="standing-table" id="confActivityTable"></table>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Full Transfer List</h2>
+      <div class="section-note" id="listNote"></div>
+    </div>
+    <div class="controls">
+      <input class="search" id="listSearch" placeholder="Search player, from school, to school…" autocomplete="off">
+      <select class="school-select" id="fromConfFilter"></select>
+      <select class="school-select" id="toConfFilter"></select>
+      <div class="pos-filter" id="posFilterWrap">
+        <button type="button" class="pos-filter-btn" id="posFilterBtn">All Positions</button>
+        <div class="pos-panel" id="posFilterPanel" hidden>
+          <div class="pos-panel-actions">
+            <button type="button" class="pos-clear-link" id="posClearBtn">Clear</button>
+          </div>
+          <div id="posPanelGroups"></div>
+        </div>
+      </div>
+      <button type="button" class="filter-clear" id="listFilterClear" style="margin-left:auto;">Clear Filters &#10005;</button>
+    </div>
+    <div class="roster-grid" id="transferListGrid">
+      <div class="row-head">
+        <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
+        <span data-sort="fromSchool">From</span><span data-sort="fromConf">Conf.</span>
+        <span data-sort="toSchool">To</span>
+      </div>
+      <div id="listBody"></div>
+    </div>
+  </section>
+
+  <footer>Source: roster snapshot dataset, last updated <span id="lastUpdatedFoot"></span>. Only confirmed transfers are shown (name cross-reference or incoming bio text) &mdash; a school with no confirmed transfers here hasn't necessarily kept everyone, it just hasn't had a departure resolve to a tracked destination yet.</footer>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+/* ============ shared helpers (mirrors index.html / team.html) ============ */
+const CLASS_ORDER = ["Fr","R-Fr","So","R-So","Jr","R-Jr","Sr","R-Sr","Gr"];
+
+const OFFENSE_ORDER = ["QB","RB","FB","HB","TB","WR","SL","SLOT","SB","H","TE","OL","OT","OG","G","C"];
+const DEFENSE_ORDER = ["DL","DE","DT","NT","EDGE","LB","OLB","ILB","MLB","SPUR","STAR","BANDIT","DB","CB","NB","S","FS","SS","SAF","ROV"];
+const ST_ORDER = ["K","PK","P","LS","SPEC"];
+const POSITION_GROUPS = ["Offense","Defense","Special Teams","Other"];
+const OL_ALIASES = new Set(["LT","RT","LG","RG","OG","T","C"]);
+function positionFilterKey(key){ return OL_ALIASES.has(key) ? "OL" : key; }
+
+function classifyPosition(raw){
+  if(!raw) return {category:"Other", rank:999};
+  const tokens = raw.toUpperCase().split(/[\/\s]+/).filter(Boolean);
+  for(const tok of tokens){
+    let idx = OFFENSE_ORDER.indexOf(tok);
+    if(idx !== -1) return {category:"Offense", rank:idx};
+    idx = DEFENSE_ORDER.indexOf(tok);
+    if(idx !== -1) return {category:"Defense", rank:idx};
+    idx = ST_ORDER.indexOf(tok);
+    if(idx !== -1) return {category:"Special Teams", rank:idx};
+  }
+  const lower = raw.toLowerCase();
+  if(/quarterback/.test(lower)) return {category:"Offense", rank:0};
+  if(/running back/.test(lower)) return {category:"Offense", rank:1};
+  if(/fullback/.test(lower)) return {category:"Offense", rank:2};
+  if(/wide receiver/.test(lower)) return {category:"Offense", rank:4};
+  if(/tight end/.test(lower)) return {category:"Offense", rank:6};
+  if(/offensive/.test(lower)) return {category:"Offense", rank:7};
+  if(/defensive end/.test(lower)) return {category:"Defense", rank:1};
+  if(/defensive tackle/.test(lower)) return {category:"Defense", rank:2};
+  if(/defensive line/.test(lower)) return {category:"Defense", rank:0};
+  if(/linebacker/.test(lower)) return {category:"Defense", rank:5};
+  if(/defensive back/.test(lower)) return {category:"Defense", rank:9};
+  if(/cornerback/.test(lower)) return {category:"Defense", rank:10};
+  if(/safety/.test(lower)) return {category:"Defense", rank:11};
+  if(/kicker/.test(lower)) return {category:"Special Teams", rank:0};
+  if(/punter/.test(lower)) return {category:"Special Teams", rank:1};
+  if(/(long snapper|snapper)/.test(lower)) return {category:"Special Teams", rank:2};
+  if(/(coach|manager|mgr)/.test(lower)) return {category:"Other", rank:0};
+  return {category:"Other", rank:998};
+}
+
+function escapeHtml(str){
+  if(str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+async function loadData(){
+  const res = await fetch('https://etchglow.github.io/data.json', {cache:"no-store"});
+  if(!res.ok) throw new Error("fetch failed: " + res.status);
+  return await res.json();
+}
+
+function flattenSchools(data){
+  const list = [];
+  data.conferences.forEach(conf=>{
+    conf.schools.forEach(s=>{
+      list.push(Object.assign({confName: conf.name}, s));
+    });
+  });
+  return list;
+}
+
+/* ============ non-D3 origin matching ============ */
+const JUCO_DIVISIONS = new Set(["NJCAA","CCCAA","NWAC"]);
+const DIVISION_LABEL = {
+  "D1-FBS":"D1 (FBS)", "D1-FCS":"D1 (FCS)", "D2":"D2",
+  "NAIA":"NAIA", "NJCAA":"NJCAA", "CCCAA":"CCCAA", "NWAC":"NWAC"
+};
+const DIVISION_ORDER = ["D1-FBS","D1-FCS","D2","NAIA","NJCAA","CCCAA","NWAC"];
+
+function normalizeSchoolText(s){
+  return String(s||"")
+    .toLowerCase()
+    .replace(/&/g," and ")
+    .replace(/[.’']/g,"")
+    .replace(/^\s*the\s+/,"")
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+}
+
+async function loadNonD3Schools(){
+  try{
+    const res = await fetch('https://etchglow.github.io/non-d3-football-schools.json', {cache:"no-store"});
+    if(!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.schools) ? data.schools : [];
+  }catch(e){ return []; }
+}
+
+/* Every school gets its full name indexed, plus one mechanical variant with a trailing
+   "University"/"College" stripped ("North Dakota State University" -> also indexes "North
+   Dakota State"), since bios commonly drop that suffix. This is a deterministic transform, not
+   a hand-authored abbreviation guess - it won't catch a state-system short form like
+   "UW-Whitewater", only a suffix drop. */
+function addSchoolAliases(map, name, entry){
+  const add = (variant) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
+  add(name);
+  const stripped = name.replace(/\s+(university|college)\s*$/i, "").trim();
+  if(stripped && stripped.toLowerCase() !== name.toLowerCase()) add(stripped);
+}
+
+/* Juco names additionally get "X CC" / "X JC" / "X Community College" variants, since roster
+   bios abbreviate juco names far more inconsistently than four-year schools. */
+function buildNonD3Index(schools){
+  const map = new Map();
+  const add = (variant, entry) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
+  schools.forEach(s=>{
+    const entry = {name:s.name, division:s.division};
+    addSchoolAliases(map, s.name, entry);
+    if(JUCO_DIVISIONS.has(s.division)){
+      const base = s.name.replace(/\s+(community college|junior college|college)\s*$/i, "").trim();
+      if(base && base.toLowerCase() !== s.name.toLowerCase()){
+        add(base, entry);
+        add(base + " CC", entry);
+        add(base + " JC", entry);
+        add(base + " Community College", entry);
+        add(base + " College", entry);
+      }
+    }
+  });
+  return map;
+}
+
+function buildD3Index(schools){
+  const map = new Map();
+  schools.forEach(s=> addSchoolAliases(map, s.name, {name:s.name, confName:s.confName}));
+  return map;
+}
+
+/* Prefers the dedicated previousSchool field (see PlayerEntry.PreviousSchool - only populated
+   for snapshots scraped after that field was added). Older snapshots and the one Presto2
+   template that can't distinguish "High School" from "Previous School" by column label alone
+   fall back to pulling a candidate out of the free-text highSchool field: sites that embed a
+   prior college there use "HS (Prev)" or "HS / Prev", so only those two positions - plus the
+   whole field as a last resort - are tried, and matching is always exact-normalized against
+   the known-school index rather than a loose substring, so "Boston College HS" can't
+   false-positive against "Boston College". */
+function previousSchoolCandidates(p){
+  if(p.previousSchool && p.previousSchool.trim()) return [p.previousSchool.trim()];
+  const text = String(p.highSchool||"").trim();
+  if(!text) return [];
+  const candidates = [];
+  const parenMatch = text.match(/\(([^)]+)\)\s*$/);
+  if(parenMatch) candidates.push(parenMatch[1].trim());
+  if(text.includes("/")){
+    const parts = text.split("/");
+    candidates.push(parts[parts.length-1].trim());
+  }
+  candidates.push(text);
+  return candidates;
+}
+
+function classifyOrigin(p, nonD3Index, d3Index){
+  for(const candidate of previousSchoolCandidates(p)){
+    if(!candidate) continue;
+    const n = normalizeSchoolText(candidate);
+    const d3Hit = d3Index.get(n);
+    if(d3Hit) return {text:candidate, matchedName:d3Hit.name, matchedConf:d3Hit.confName, scope:"d3", division:null};
+    const hit = nonD3Index.get(n);
+    if(hit) return {text:candidate, matchedName:hit.name, matchedConf:null, scope:"non-d3", division:hit.division};
+  }
+  return null;
+}
+
+function findNonD3Incoming(schools, nonD3Index, d3Index){
+  const rows = [];
+  schools.forEach(s=>{
+    s.players.forEach(p=>{
+      if(p.category !== "New") return;
+      const origin = classifyOrigin(p, nonD3Index, d3Index);
+      if(origin && origin.scope === "non-d3"){
+        rows.push({
+          name: p.name, position: p.position || "", positionKey: positionFilterKey((p.position||"").toUpperCase().trim()),
+          cls: p.cls, school: s.name, confName: s.confName,
+          originText: origin.text, originName: origin.matchedName, division: origin.division
+        });
+      }
+    });
+  });
+  return rows;
+}
+
+/* ============ transfer event model ============ */
+/* Two independent ways a transfer gets confirmed, merged into one event list:
+   1. Name-match (mirrors Program.ClassifyDepartures): a "Gone" player's DepartureReason
+      reads "Transferred to X" only when their name was matched against another tracked
+      school's New list in the same run - misses any transfer where the origin school
+      wasn't part of this run's diff.
+   2. Bio-match: a "New" player's own previous-school text (see classifyOrigin) names
+      another tracked D3 program directly, regardless of whether that program was
+      rescraped this run. Deliberately scoped to category === "New" only, not
+      "Returning" - a returning player's bio still names the same old previous school
+      every snapshot, and re-matching it each time would manufacture a "new" transfer
+      that isn't news.
+   Everything else (graduated guesses, unmatched departures, players from schools that
+   weren't part of a fresh diff) is left out entirely - this page only shows confirmed
+   transfers, one event per player even when both passes would otherwise catch them. */
+function buildEvents(schools, byName, nonD3Index, d3Index){
+  const events = [];
+  const confirmedKeys = new Set(); // `${player}||${toSchool}`, lowercased
+  let totalGone = 0;
+
+  schools.forEach(s=>{
+    s.players.forEach(p=>{
+      if(p.category !== "Gone") return;
+      totalGone++;
+      const r = p.departureReason || "";
+      if(!r.startsWith("Transferred to ")) return;
+      const destName = r.slice("Transferred to ".length);
+      const dest = byName.get(destName.toLowerCase());
+      const toSchool = dest ? dest.name : destName;
+      const toConf = dest ? dest.confName : null;
+      const toResolved = !!dest;
+      events.push({
+        name: p.name, position: p.position || "", positionKey: positionFilterKey((p.position||"").toUpperCase().trim()),
+        cls: p.cls, fromSchool: s.name, fromConf: s.confName,
+        toSchool, toConf, toResolved, source: "name-match"
+      });
+      if(toResolved) confirmedKeys.add(p.name.toLowerCase() + "||" + toSchool.toLowerCase());
+    });
+  });
+
+  schools.forEach(s=>{
+    s.players.forEach(p=>{
+      if(p.category !== "New") return;
+      const origin = classifyOrigin(p, nonD3Index, d3Index);
+      if(!origin || origin.scope !== "d3" || origin.matchedName === s.name) return;
+      const key = p.name.toLowerCase() + "||" + s.name.toLowerCase();
+      if(confirmedKeys.has(key)) return;
+      confirmedKeys.add(key);
+      events.push({
+        name: p.name, position: p.position || "", positionKey: positionFilterKey((p.position||"").toUpperCase().trim()),
+        cls: p.cls, fromSchool: origin.matchedName, fromConf: origin.matchedConf,
+        toSchool: s.name, toConf: s.confName, toResolved: true, source: "bio-match"
+      });
+    });
+  });
+
+  return {events, totalGone};
+}
+
+function aggregateBySchool(events, schools){
+  const map = new Map();
+  schools.forEach(s=> map.set(s.name, {name:s.name, confName:s.confName, out:0, in:0}));
+  events.forEach(e=>{
+    const from = map.get(e.fromSchool);
+    if(from) from.out++;
+    if(e.toResolved){
+      const to = map.get(e.toSchool);
+      if(to) to.in++;
+    }
+  });
+  return map;
+}
+
+function aggregateByConference(schoolAgg, schools){
+  const map = new Map();
+  schools.forEach(s=>{
+    if(!map.has(s.confName)) map.set(s.confName, {name:s.confName, schoolCount:0, out:0, in:0});
+    map.get(s.confName).schoolCount++;
+  });
+  schoolAgg.forEach(sa=>{
+    const c = map.get(sa.confName);
+    c.out += sa.out;
+    c.in += sa.in;
+  });
+  return map;
+}
+
+function computeConfPairs(events){
+  const map = new Map();
+  events.forEach(e=>{
+    if(!e.toResolved) return;
+    const key = e.fromConf + "→" + e.toConf;
+    if(!map.has(key)) map.set(key, {fromConf:e.fromConf, toConf:e.toConf, count:0, within: e.fromConf===e.toConf});
+    map.get(key).count++;
+  });
+  return [...map.values()].sort((a,b)=>b.count-a.count);
+}
+
+/* ============ generic bar renderers ============ */
+function renderMagnitudeBars(el, rows, labelFn, valueFn){
+  if(!rows.length){ el.innerHTML = ""; return; }
+  const max = Math.max(...rows.map(valueFn), 1);
+  el.innerHTML = rows.map(r=>{
+    const v = valueFn(r);
+    return `<div class="geo-row">
+      <div class="geo-label" title="${escapeHtml(labelFn(r))}">${labelFn(r)}</div>
+      <div class="geo-track"><div class="geo-fill" style="width:${v/max*100}%"></div></div>
+      <div class="geo-count">${v}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderDivergingBars(el, rows, labelFn, valueFn, onClick){
+  if(!rows.length){ el.innerHTML = `<div class="empty-note">No confirmed transfer activity to rank yet.</div>`; return; }
+  const maxAbs = Math.max(...rows.map(r=>Math.abs(valueFn(r))), 1);
+  el.innerHTML = rows.map(r=>{
+    const v = valueFn(r);
+    const pct = Math.min(100, Math.abs(v)/maxAbs*100) / 2;
+    const fillHtml = v===0 ? "" : `<div class="net-fill ${v>0?'pos':'neg'}" style="width:${pct}%"></div>`;
+    const valCls = v>0?'pos':v<0?'neg':'flat';
+    const safeLabel = escapeHtml(labelFn(r));
+    return `<div class="net-row${onClick?' clickable':''}" ${onClick?`data-key="${safeLabel}"`:''}>
+      <div class="net-label" title="${safeLabel}">${safeLabel}</div>
+      <div class="net-track"><div class="net-zero"></div>${fillHtml}</div>
+      <div class="net-value ${valCls}">${v>0?'+':''}${v}</div>
+    </div>`;
+  }).join("");
+  if(onClick){
+    el.querySelectorAll('.net-row[data-key]').forEach(row=>{
+      row.addEventListener('click', ()=> onClick(row.dataset.key));
+    });
+  }
+}
+
+/* ============ D3 bar charts ============ */
+function renderPositionVolumeChart(el, events){
+  el.innerHTML = "";
+  const counts = {};
+  events.forEach(e=>{
+    const k = e.positionKey || "?";
+    counts[k] = (counts[k]||0) + 1;
+  });
+  const data = Object.entries(counts).map(([pos,count])=>({pos,count}))
+    .sort((a,b)=>b.count-a.count).slice(0,12).reverse();
+
+  if(!data.length){ el.innerHTML = `<div class="empty-note">No confirmed transfers to chart yet.</div>`; return; }
+
+  const margin = {top:8,right:36,bottom:8,left:56};
+  const width = Math.min(1100, el.parentElement.clientWidth - 40) - margin.left - margin.right;
+  const barHeight = 22, gap = 8;
+  const height = data.length * (barHeight+gap);
+
+  const svg = d3.select(el).append("svg")
+    .attr("width","100%").attr("viewBox",`0 0 ${width+margin.left+margin.right} ${height+margin.top+margin.bottom}`)
+    .append("g").attr("transform",`translate(${margin.left},${margin.top})`);
+
+  const x = d3.scaleLinear().domain([0, d3.max(data,d=>d.count)]).nice().range([0,width]);
+  const y = d3.scaleBand().domain(data.map(d=>d.pos)).range([height,0]).padding(0.28);
+
+  svg.append("g").attr("class","axis").call(d3.axisLeft(y));
+
+  const tooltip = d3.select("#tooltip");
+  svg.selectAll("rect").data(data).join("rect")
+    .attr("x",0).attr("y", d=>y(d.pos)).attr("height", y.bandwidth())
+    .attr("width", d=>x(d.count)).attr("rx",2)
+    .attr("fill", "var(--gold)")
+    .on("mousemove",(event,d)=>{
+      tooltip.style("opacity",1).style("left",(event.pageX+14)+"px").style("top",(event.pageY-10)+"px")
+        .html(`<b>${escapeHtml(d.pos)}</b><br>${d.count} confirmed transfers`);
+    }).on("mouseleave",()=>tooltip.style("opacity",0));
+
+  svg.selectAll("text.val").data(data).join("text").attr("class","val")
+    .attr("x", d=>x(d.count)+6).attr("y", d=>y(d.pos)+y.bandwidth()/2+4)
+    .attr("fill","var(--muted)").attr("font-family","var(--mono)").attr("font-size","11px")
+    .text(d=>d.count);
+}
+
+function renderClassVolumeChart(el, events){
+  el.innerHTML = "";
+  const counts = {};
+  CLASS_ORDER.forEach(c=> counts[c] = 0);
+  events.forEach(e=>{ if(counts.hasOwnProperty(e.cls)) counts[e.cls]++; });
+  const data = CLASS_ORDER.map(c=>({cls:c, count:counts[c]})).filter(d=>d.count>0);
+
+  if(!data.length){ el.innerHTML = `<div class="empty-note">No confirmed transfers to chart yet.</div>`; return; }
+
+  const margin = {top:16,right:16,bottom:34,left:40};
+  const width = Math.min(1100, el.parentElement.clientWidth - 40) - margin.left - margin.right;
+  const height = 260 - margin.top - margin.bottom;
+
+  const svg = d3.select(el).append("svg")
+    .attr("width","100%").attr("viewBox",`0 0 ${width+margin.left+margin.right} ${height+margin.top+margin.bottom}`)
+    .append("g").attr("transform",`translate(${margin.left},${margin.top})`);
+
+  const x = d3.scaleBand().domain(data.map(d=>d.cls)).range([0,width]).padding(0.35);
+  const y = d3.scaleLinear().domain([0, Math.max(1,d3.max(data,d=>d.count))]).nice().range([height,0]);
+
+  svg.append("g").attr("transform",`translate(0,${height})`).attr("class","axis").call(d3.axisBottom(x));
+  svg.append("g").attr("class","axis").call(d3.axisLeft(y).ticks(4));
+
+  const tooltip = d3.select("#tooltip");
+  svg.selectAll("rect").data(data).join("rect")
+    .attr("x", d=>x(d.cls)).attr("width", x.bandwidth())
+    .attr("y", d=>y(d.count)).attr("height", d=>height-y(d.count)).attr("rx",2)
+    .attr("fill","var(--gold)")
+    .on("mousemove",(event,d)=>{
+      tooltip.style("opacity",1).style("left",(event.pageX+14)+"px").style("top",(event.pageY-10)+"px")
+        .html(`<b>${d.cls}</b><br>${d.count} confirmed transfers`);
+    }).on("mouseleave",()=>tooltip.style("opacity",0));
+}
+
+/* ============ page state / render ============ */
+const APP = { data:null, schools:[], byName:new Map(), events:[], totalGone:0 };
+let listFilter = { search:"", fromConf:"all", toConf:"all", positions:new Set() };
+let listSortColumn = "name", listSortDir = "asc";
+let listPosRowEls = {}, listPosCountEls = {}, listPosGroupEls = [];
+
+function fmtPct(n){ return n==null ? "&mdash;" : Math.round(n) + "%"; }
+
+function renderHero(data, schools, events, totalGone){
+  const resolved = events.filter(e=>e.toResolved);
+  const cross = resolved.filter(e=>e.fromConf!==e.toConf).length;
+  const within = resolved.length - cross;
+  const crossPct = resolved.length ? cross/resolved.length*100 : null;
+  const withinPct = resolved.length ? within/resolved.length*100 : null;
+  const schoolsInvolved = new Set();
+  events.forEach(e=>{ schoolsInvolved.add(e.fromSchool); if(e.toResolved) schoolsInvolved.add(e.toSchool); });
+
+  document.getElementById('statRow').innerHTML = `
+    <div class="stat"><div class="n">${events.length}</div><div class="l">Confirmed Transfers</div></div>
+    <div class="stat"><div class="n">${schoolsInvolved.size}</div><div class="l">Schools Involved</div></div>
+    <div class="stat"><div class="n">${fmtPct(crossPct)}</div><div class="l">Left Their Conference</div></div>
+    <div class="stat"><div class="n">${fmtPct(withinPct)}</div><div class="l">Stayed In Conference</div></div>
+    <div class="stat"><div class="n muted">${schools.length}</div><div class="l">Schools Tracked</div></div>
+  `;
+
+  // Denominator here is deliberately just the name-match pass's resolved count, not
+  // events.length - a bio-match event is confirmed from an incoming player's own record, not
+  // from resolving one of this school's Gone departures, so it doesn't shrink this count.
+  const resolvedFromGone = events.filter(e=>e.source==="name-match" && e.toResolved).length;
+  const unconfirmed = Math.max(0, totalGone - resolvedFromGone);
+  const bioMatchCount = events.filter(e=>e.source==="bio-match").length;
+  document.getElementById('dataNote').innerHTML =
+    `<span>&#9432;</span><span>A transfer is confirmed here either by name cross-reference (a departing player matched to another tracked school's New list) or by an incoming player's own bio naming their previous D3 school${bioMatchCount ? ` (${bioMatchCount.toLocaleString()} of the transfers above came from bio text alone)` : ""}. ${unconfirmed.toLocaleString()} other departed players aren't shown at all: most graduated, left for a program outside this tracker, or their school wasn't part of a fresh diff this snapshot.</span>`;
+
+  document.getElementById('lastUpdatedFoot').textContent = data.lastUpdated || "unknown";
+}
+
+function renderConfFlow(events){
+  const pairs = computeConfPairs(events);
+  const el = document.getElementById('confFlowBars');
+  if(!pairs.length){
+    el.innerHTML = `<div class="empty-note">No confirmed cross-school transfers with a resolvable destination yet &mdash; this fills in as more conferences are scraped together in the same run.</div>`;
+  } else {
+    renderMagnitudeBars(el, pairs.slice(0,20),
+      p => p.within ? `${escapeHtml(p.fromConf)} <span class="within-tag">(within conference)</span>` : `${escapeHtml(p.fromConf)} &rarr; ${escapeHtml(p.toConf)}`,
+      p => p.count);
+  }
+
+  const logEl = document.getElementById('confirmedLog');
+  if(!events.length){ logEl.innerHTML = ""; return; }
+  // Name-match events are all appended before bio-match ones (see buildEvents), so this sorts
+  // by player name first - otherwise a slice(0,500) would show name-match events almost
+  // exclusively whenever there happen to be 500+ of them.
+  const sorted = [...events].sort((a,b)=>a.name.localeCompare(b.name));
+  const shown = sorted.slice(0,500);
+  logEl.innerHTML = `<div class="log-divider"><div class="log-title">Confirmed Transfer Log${events.length>500?' (first 500)':''}</div>${
+    shown.map(e=>`<div class="event-row">
+      <div class="event-who">${escapeHtml(e.name)}<span class="pos">${escapeHtml(e.position)}</span></div>
+      <div class="event-path"><b>${escapeHtml(e.fromSchool)}</b> &rarr; <b>${escapeHtml(e.toResolved ? e.toSchool : (e.toSchool + ' (unmatched)'))}</b>${e.source==="bio-match" ? ' <span class="origin-badge" title="Confirmed from the incoming player\'s own previous-school text, not a name cross-reference">via bio</span>' : ''}</div>
+    </div>`).join("")
+  }</div>`;
+}
+
+function renderNetMargins(schoolAgg, confAgg){
+  const confRows = [...confAgg.values()].map(c=>({name:c.name, net:c.in-c.out}))
+    .sort((a,b)=>b.net-a.net || a.name.localeCompare(b.name));
+  renderDivergingBars(document.getElementById('netConfBars'), confRows, r=>r.name, r=>r.net, null);
+
+  const schoolRowsAll = [...schoolAgg.values()]
+    .filter(s=>s.in>0 || s.out>0)
+    .map(s=>({name:s.name, net:s.in-s.out}))
+    .sort((a,b)=>b.net-a.net || a.name.localeCompare(b.name));
+
+  let schoolRows = schoolRowsAll;
+  const capNoteEl = document.getElementById('netSchoolCapNote');
+  if(schoolRowsAll.length > 30){
+    schoolRows = [...schoolRowsAll.slice(0,15), ...schoolRowsAll.slice(-15)];
+    capNoteEl.textContent = `Showing the top 15 and bottom 15 of ${schoolRowsAll.length} schools with confirmed transfer activity.`;
+  } else {
+    capNoteEl.textContent = "";
+  }
+  renderDivergingBars(document.getElementById('netSchoolBars'), schoolRows, r=>r.name, r=>r.net,
+    (name)=>{ window.location.href = `team.html?school=${encodeURIComponent(name)}`; });
+}
+
+function renderConfActivityTable(confAgg){
+  const rows = [...confAgg.values()].sort((a,b)=> b.out - a.out || a.name.localeCompare(b.name));
+  let html = `<tr><th>Conference</th><th class="num">Schools</th><th class="num">Confirmed Out</th>
+    <th class="num">Confirmed In</th><th class="num">Net</th></tr>`;
+  rows.forEach(c=>{
+    const net = c.in - c.out;
+    const netHtml = net===0 ? `<span style="color:var(--muted)">0</span>`
+      : net>0 ? `<span style="color:var(--gold-bright)">+${net}</span>`
+      : `<span style="color:var(--rust-bright)">${net}</span>`;
+    html += `<tr>
+      <td>${escapeHtml(c.name)}</td>
+      <td class="num">${c.schoolCount}</td>
+      <td class="num">${c.out}</td>
+      <td class="num">${c.in}</td>
+      <td class="num">${netHtml}</td>
+    </tr>`;
+  });
+  document.getElementById('confActivityTable').innerHTML = html;
+}
+
+/* ============ full transfer list (filterable) ============ */
+function listSortValue(e, col){
+  if(col === "cls"){ const i = CLASS_ORDER.indexOf(e.cls); return i===-1 ? 999 : i; }
+  if(col === "toSchool"){ return (e.toSchool || "zzz").toLowerCase(); }
+  return (e[col] || "").toString().toLowerCase();
+}
+
+function listRowHtml(e){
+  const toHtml = `${escapeHtml(e.toSchool)}${!e.toResolved ? ' <span style="color:var(--stale)">(unmatched)</span>' : ''}`;
+  return `<div class="row">
+    <div class="cell-name">${escapeHtml(e.name)}</div>
+    <div class="mono-cell">${escapeHtml(e.position) || '&mdash;'}</div>
+    <div class="mono-cell">${escapeHtml(e.cls) || '&mdash;'}</div>
+    <div class="mono-cell">${escapeHtml(e.fromSchool)}</div>
+    <div class="mono-cell">${escapeHtml(e.fromConf)}</div>
+    <div class="mono-cell">${toHtml}</div>
+  </div>`;
+}
+
+function buildPositionPanel(events){
+  const posPanelGroups = document.getElementById('posPanelGroups');
+  const keyCounts = {};
+  events.forEach(e=>{ if(e.positionKey) keyCounts[e.positionKey] = (keyCounts[e.positionKey]||0)+1; });
+  const entries = Object.keys(keyCounts).map(pos=>({pos, count:keyCounts[pos], ...classifyPosition(pos)}));
+  const groups = {Offense:[], Defense:[], "Special Teams":[], Other:[]};
+  entries.forEach(e=> groups[e.category].push(e));
+  Object.values(groups).forEach(list=> list.sort((a,b)=> a.rank-b.rank || a.pos.localeCompare(b.pos)));
+
+  posPanelGroups.innerHTML = POSITION_GROUPS.map(cat=>{
+    if(groups[cat].length===0) return "";
+    return `<div class="pos-group">
+      <div class="pos-group-label">${cat}</div>
+      ${groups[cat].map(e=>{ const safePos = escapeHtml(e.pos); return `
+        <label class="pos-row">
+          <input type="checkbox" data-pos="${safePos}">
+          <span class="pos-name">${safePos}</span>
+          <span class="pos-count" data-pos-count="${safePos}">(${e.count})</span>
+        </label>`; }).join("")}
+    </div>`;
+  }).join("");
+
+  listPosCountEls = {}; listPosRowEls = {};
+  posPanelGroups.querySelectorAll('.pos-row').forEach(row=>{
+    const cb = row.querySelector('input[type=checkbox]');
+    const pos = cb.dataset.pos;
+    listPosRowEls[pos] = row;
+    listPosCountEls[pos] = row.querySelector('.pos-count');
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) listFilter.positions.add(pos); else listFilter.positions.delete(pos);
+      updatePosButtonLabel();
+      drawList();
+    });
+  });
+  listPosGroupEls = [...posPanelGroups.querySelectorAll('.pos-group')];
+}
+
+function updatePosButtonLabel(){
+  const btn = document.getElementById('posFilterBtn');
+  if(listFilter.positions.size===0) btn.textContent = "All Positions";
+  else if(listFilter.positions.size===1) btn.textContent = [...listFilter.positions][0];
+  else btn.textContent = `${listFilter.positions.size} Positions`;
+}
+
+function updatePositionCounts(baseList){
+  const keyCounts = {};
+  baseList.forEach(e=>{ if(e.positionKey) keyCounts[e.positionKey] = (keyCounts[e.positionKey]||0)+1; });
+  Object.keys(listPosRowEls).forEach(pos=>{
+    const n = keyCounts[pos] || 0;
+    const show = n > 0 || listFilter.positions.has(pos);
+    listPosRowEls[pos].style.display = show ? "" : "none";
+    if(show) listPosCountEls[pos].textContent = n > 0 ? `(${n})` : "";
+  });
+  listPosGroupEls.forEach(g=>{
+    const anyVisible = [...g.querySelectorAll('.pos-row')].some(r=> r.style.display !== "none");
+    g.style.display = anyVisible ? "" : "none";
+  });
+}
+
+function updateListSortHeaders(){
+  document.querySelectorAll('#transferListGrid .row-head span[data-sort]').forEach(span=>{
+    const col = span.dataset.sort;
+    span.classList.toggle('sorted', col === listSortColumn);
+    span.querySelector('.sort-arrow')?.remove();
+    if(col === listSortColumn){
+      const arrow = document.createElement('span');
+      arrow.className = 'sort-arrow';
+      arrow.textContent = listSortDir === 'asc' ? '▲' : '▼';
+      span.appendChild(arrow);
+    }
+  });
+}
+
+function getNonPositionFilteredList(){
+  const search = listFilter.search.trim().toLowerCase();
+  return APP.events.filter(e=>{
+    if(listFilter.fromConf!=="all" && e.fromConf!==listFilter.fromConf) return false;
+    if(listFilter.toConf==="__unmatched__"){ if(e.toResolved) return false; }
+    else if(listFilter.toConf!=="all" && e.toConf!==listFilter.toConf) return false;
+    if(search){
+      const hay = `${e.name} ${e.fromSchool} ${e.toSchool||""}`.toLowerCase();
+      if(!hay.includes(search)) return false;
+    }
+    return true;
+  });
+}
+
+function drawList(){
+  const base = getNonPositionFilteredList();
+  updatePositionCounts(base);
+  const list = listFilter.positions.size===0 ? base : base.filter(e=>listFilter.positions.has(e.positionKey));
+
+  list.sort((a,b)=>{
+    const va = listSortValue(a, listSortColumn), vb = listSortValue(b, listSortColumn);
+    let cmp = va < vb ? -1 : va > vb ? 1 : 0;
+    if(cmp===0) cmp = a.name.localeCompare(b.name);
+    return listSortDir === 'asc' ? cmp : -cmp;
+  });
+  updateListSortHeaders();
+
+  document.getElementById('listNote').textContent = `${list.length} of ${APP.events.length} confirmed transfers`;
+  const body = document.getElementById('listBody');
+  if(!list.length){
+    body.innerHTML = `<div class="list-empty">No departures match the current filters.</div>`;
+  } else if(list.length > 500){
+    body.innerHTML = `<div class="row" style="grid-template-columns:1fr;color:var(--muted);font-family:var(--mono);font-size:12px;">
+      Showing first 500 of ${list.length} &mdash; narrow with search or filters to see more.</div>` +
+      list.slice(0,500).map(listRowHtml).join("");
+  } else {
+    body.innerHTML = list.map(listRowHtml).join("");
+  }
+}
+
+function initListControls(){
+  document.getElementById('listSearch').addEventListener('input', (e)=>{ listFilter.search = e.target.value; drawList(); });
+
+  const confNames = [...new Set(APP.schools.map(s=>s.confName))].sort();
+  const fromSel = document.getElementById('fromConfFilter');
+  const toSel = document.getElementById('toConfFilter');
+  fromSel.innerHTML = `<option value="all">Any From Conference</option>` + confNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+  toSel.innerHTML = `<option value="all">Any To Conference</option><option value="__unmatched__">Unmatched Destination School</option>` +
+    confNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+  fromSel.addEventListener('change', ()=>{ listFilter.fromConf = fromSel.value; drawList(); });
+  toSel.addEventListener('change', ()=>{ listFilter.toConf = toSel.value; drawList(); });
+
+  buildPositionPanel(APP.events);
+  const posBtn = document.getElementById('posFilterBtn');
+  const posPanel = document.getElementById('posFilterPanel');
+  posBtn.addEventListener('click', (e)=>{ e.stopPropagation(); posPanel.hidden = !posPanel.hidden; });
+  document.addEventListener('click', (e)=>{
+    if(!document.getElementById('posFilterWrap').contains(e.target)) posPanel.hidden = true;
+  });
+  document.getElementById('posClearBtn').addEventListener('click', ()=>{
+    listFilter.positions.clear();
+    document.querySelectorAll('#posPanelGroups input[type=checkbox]').forEach(cb=>cb.checked=false);
+    updatePosButtonLabel();
+    drawList();
+  });
+
+  document.getElementById('listFilterClear').addEventListener('click', ()=>{
+    listFilter = { search:"", fromConf:"all", toConf:"all", positions:new Set() };
+    document.getElementById('listSearch').value = "";
+    fromSel.value = "all"; toSel.value = "all";
+    document.querySelectorAll('#posPanelGroups input[type=checkbox]').forEach(cb=>cb.checked=false);
+    updatePosButtonLabel();
+    drawList();
+  });
+
+  document.querySelectorAll('#transferListGrid .row-head span[data-sort]').forEach(span=>{
+    span.addEventListener('click', ()=>{
+      const col = span.dataset.sort;
+      if(listSortColumn === col) listSortDir = listSortDir === 'asc' ? 'desc' : 'asc';
+      else { listSortColumn = col; listSortDir = 'asc'; }
+      drawList();
+    });
+  });
+}
+
+/* ============ incoming-from-outside-D3 (best-effort) ============ */
+let nonD3Rows = [];
+let nonD3Filter = { search:"", conf:"all", division:"all" };
+let nonD3SortColumn = "name", nonD3SortDir = "asc";
+
+function nonD3SortValue(r, col){
+  if(col === "cls"){ const i = CLASS_ORDER.indexOf(r.cls); return i===-1 ? 999 : i; }
+  if(col === "division"){ const i = DIVISION_ORDER.indexOf(r.division); return i===-1 ? 999 : i; }
+  return (r[col] || "").toString().toLowerCase();
+}
+
+function nonD3RowHtml(r){
+  return `<div class="row">
+    <div class="cell-name">${escapeHtml(r.name)}</div>
+    <div class="mono-cell">${escapeHtml(r.position) || '&mdash;'}</div>
+    <div class="mono-cell">${escapeHtml(r.cls) || '&mdash;'}</div>
+    <div class="mono-cell">${escapeHtml(r.school)}</div>
+    <div class="mono-cell">${escapeHtml(r.confName)}</div>
+    <div class="mono-cell">${escapeHtml(r.originName)} <span class="origin-badge" title="Matched text: &quot;${escapeHtml(r.originText)}&quot; — best-effort match, not confirmed">${escapeHtml(DIVISION_LABEL[r.division])}</span></div>
+  </div>`;
+}
+
+function updateNonD3SortHeaders(){
+  document.querySelectorAll('#nonD3ListGrid .row-head span[data-sort]').forEach(span=>{
+    const col = span.dataset.sort;
+    span.classList.toggle('sorted', col === nonD3SortColumn);
+    span.querySelector('.sort-arrow')?.remove();
+    if(col === nonD3SortColumn){
+      const arrow = document.createElement('span');
+      arrow.className = 'sort-arrow';
+      arrow.textContent = nonD3SortDir === 'asc' ? '▲' : '▼';
+      span.appendChild(arrow);
+    }
+  });
+}
+
+function getFilteredNonD3(){
+  const search = nonD3Filter.search.trim().toLowerCase();
+  return nonD3Rows.filter(r=>{
+    if(nonD3Filter.division!=="all" && r.division!==nonD3Filter.division) return false;
+    if(nonD3Filter.conf!=="all" && r.confName!==nonD3Filter.conf) return false;
+    if(search){
+      const hay = `${r.name} ${r.school} ${r.originName}`.toLowerCase();
+      if(!hay.includes(search)) return false;
+    }
+    return true;
+  });
+}
+
+function drawNonD3List(){
+  const list = getFilteredNonD3().sort((a,b)=>{
+    const va = nonD3SortValue(a, nonD3SortColumn), vb = nonD3SortValue(b, nonD3SortColumn);
+    let cmp = va < vb ? -1 : va > vb ? 1 : 0;
+    if(cmp===0) cmp = a.name.localeCompare(b.name);
+    return nonD3SortDir === 'asc' ? cmp : -cmp;
+  });
+  updateNonD3SortHeaders();
+
+  document.getElementById('nonD3Count').textContent =
+    `${list.length} of ${nonD3Rows.length} New players whose previous-school text matches a tracked non-D3 program`;
+  const body = document.getElementById('nonD3ListBody');
+  body.innerHTML = list.length ? list.map(nonD3RowHtml).join("") : `<div class="list-empty">No matches for the current filters.</div>`;
+}
+
+function renderNonD3DivisionBars(rows){
+  const counts = {};
+  rows.forEach(r=>{ counts[r.division] = (counts[r.division]||0) + 1; });
+  const data = DIVISION_ORDER.filter(d=>counts[d]).map(d=>({division:d, count:counts[d]}));
+  renderMagnitudeBars(document.getElementById('nonD3DivisionBars'), data, d=>DIVISION_LABEL[d.division], d=>d.count);
+}
+
+function initNonD3Controls(){
+  const confNames = [...new Set(nonD3Rows.map(r=>r.confName))].sort();
+  const confSel = document.getElementById('nonD3ConfFilter');
+  confSel.innerHTML = `<option value="all">Any Conference</option>` + confNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+  confSel.addEventListener('change', ()=>{ nonD3Filter.conf = confSel.value; drawNonD3List(); });
+
+  const divisionsPresent = DIVISION_ORDER.filter(d=>nonD3Rows.some(r=>r.division===d));
+  const chipsEl = document.getElementById('nonD3DivisionChips');
+  chipsEl.innerHTML = `<button type="button" class="chip active" data-division="all">All Levels</button>` +
+    divisionsPresent.map(d=>`<button type="button" class="chip" data-division="${d}">${DIVISION_LABEL[d]}</button>`).join("");
+  chipsEl.querySelectorAll('.chip').forEach(chip=>{
+    chip.addEventListener('click', ()=>{
+      chipsEl.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+      chip.classList.add('active');
+      nonD3Filter.division = chip.dataset.division;
+      drawNonD3List();
+    });
+  });
+
+  document.getElementById('nonD3Search').addEventListener('input', (e)=>{ nonD3Filter.search = e.target.value; drawNonD3List(); });
+  document.getElementById('nonD3FilterClear').addEventListener('click', ()=>{
+    nonD3Filter = { search:"", conf:"all", division:"all" };
+    document.getElementById('nonD3Search').value = "";
+    confSel.value = "all";
+    chipsEl.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.division==='all'));
+    drawNonD3List();
+  });
+
+  document.querySelectorAll('#nonD3ListGrid .row-head span[data-sort]').forEach(span=>{
+    span.addEventListener('click', ()=>{
+      const col = span.dataset.sort;
+      if(nonD3SortColumn === col) nonD3SortDir = nonD3SortDir === 'asc' ? 'desc' : 'asc';
+      else { nonD3SortColumn = col; nonD3SortDir = 'asc'; }
+      drawNonD3List();
+    });
+  });
+}
+
+/* ============ boot ============ */
+Promise.all([loadData(), loadNonD3Schools()]).then(([data, nonD3Schools])=>{
+  const schools = flattenSchools(data);
+  const byName = new Map();
+  schools.forEach(s=>byName.set(s.name.toLowerCase(), s));
+  const nonD3Index = buildNonD3Index(nonD3Schools);
+  const d3Index = buildD3Index(schools);
+
+  const {events, totalGone} = buildEvents(schools, byName, nonD3Index, d3Index);
+
+  APP.data = data; APP.schools = schools; APP.byName = byName;
+  APP.events = events; APP.totalGone = totalGone;
+
+  const schoolAgg = aggregateBySchool(events, schools);
+  const confAgg = aggregateByConference(schoolAgg, schools);
+
+  renderHero(data, schools, events, totalGone);
+  renderConfFlow(events);
+  renderNetMargins(schoolAgg, confAgg);
+  renderPositionVolumeChart(document.getElementById('posVolumeChart'), events);
+  renderClassVolumeChart(document.getElementById('classVolumeChart'), events);
+  renderConfActivityTable(confAgg);
+
+  nonD3Rows = findNonD3Incoming(schools, nonD3Index, d3Index);
+  renderNonD3DivisionBars(nonD3Rows);
+  initNonD3Controls();
+  drawNonD3List();
+
+  initListControls();
+  drawList();
+}).catch(err=>{
+  document.getElementById('statRow').innerHTML = "";
+  document.getElementById('dataNote').innerHTML = `Couldn't load roster data: ${escapeHtml(err.message)}`;
+});
+</script>
+</body>
+</html>
