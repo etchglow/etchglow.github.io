@@ -25,6 +25,23 @@
   .site-nav-link:hover{color:var(--chalk);}
   .site-nav-link.active{color:var(--gold-bright);border-bottom-color:var(--gold);font-weight:700;}
 
+  .scrape-age-banner{
+    display:flex;align-items:center;gap:8px;margin-bottom:18px;
+    font-family:var(--mono);font-size:12px;color:var(--muted);
+    background:rgba(244,241,232,0.05);border:1px solid var(--line);
+    padding:8px 13px;border-radius:2px;
+  }
+  .scrape-age-banner .age-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--gold-bright);}
+  .scrape-age-banner.age-warn{color:var(--gold-bright);border-color:rgba(201,162,39,0.35);background:rgba(201,162,39,0.08);}
+  .scrape-age-banner.age-stale{color:var(--rust-bright);border-color:rgba(178,74,58,0.4);background:rgba(178,74,58,0.1);}
+  .scrape-age-banner.age-stale .age-dot{background:var(--rust-bright);}
+
+  .beta-pill{
+    margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+    color:var(--rust-bright);border:1px solid var(--rust);padding:2px 7px;border-radius:10px;
+    text-transform:uppercase;cursor:default;align-self:center;
+  }
+
   .hero{border-bottom:1px solid var(--line);padding-bottom:26px;margin-bottom:34px;}
   .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:var(--gold-bright);margin-bottom:10px;}
   h1{font-family:var(--display);font-size:clamp(32px,5.5vw,58px);letter-spacing:0.01em;line-height:0.95;margin:0 0 12px;text-transform:uppercase;}
@@ -196,7 +213,10 @@
     <a href="index.html" class="site-nav-link">Dashboard</a>
     <a href="team.html" class="site-nav-link">Team Profile</a>
     <a href="transfer-portal.html" class="site-nav-link active">Transfer Portal</a>
+    <span class="beta-pill" title="This site is under active development — data, features, and layout may change without notice.">Beta</span>
   </div>
+
+  <div class="scrape-age-banner" id="scrapeAgeBanner"></div>
 
   <div class="hero">
     <div class="eyebrow">NCAA Division III Football · Roster Intelligence</div>
@@ -441,6 +461,27 @@ function escapeHtml(str){
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/* data.lastUpdated is the whole-dataset generation timestamp - "how old is everything
+   you're looking at," surfaced at the top of the page since that's the first thing worth
+   knowing about a scraped dataset. See the same function in index.html for the full
+   reasoning on the age tiers and why an unparseable date just falls back to raw text. */
+function renderScrapeAgeBanner(data){
+  const el = document.getElementById('scrapeAgeBanner');
+  if(!el) return;
+  const raw = data.lastUpdated;
+  if(!raw){ el.textContent = "Roster scrape date unavailable."; return; }
+
+  const parsed = new Date(raw);
+  let ageText = "", tier = "";
+  if(!isNaN(parsed.getTime())){
+    const days = (Date.now() - parsed.getTime()) / 86400000;
+    ageText = days < 1 ? "less than a day ago" : days < 2 ? "1 day ago" : `${Math.floor(days)} days ago`;
+    tier = days >= 6 ? "age-stale" : days >= 2 ? "age-warn" : "";
+  }
+  el.className = "scrape-age-banner" + (tier ? " " + tier : "");
+  el.innerHTML = `<span class="age-dot"></span>Roster data scraped ${escapeHtml(raw)}${ageText ? ` &mdash; ${ageText}` : ""}`;
 }
 
 async function loadData(){
@@ -1596,6 +1637,7 @@ function renderScoped(){
 
 /* ============ boot ============ */
 Promise.all([loadData(), loadNonD3Schools()]).then(([data, nonD3Schools])=>{
+  renderScrapeAgeBanner(data);
   const schools = flattenSchools(data);
   const byName = new Map();
   schools.forEach(s=>byName.set(s.name.toLowerCase(), s));
