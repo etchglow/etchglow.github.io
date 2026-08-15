@@ -327,7 +327,7 @@
       <section>
         <div class="section-head">
           <h2>Transfer Portal Network</h2>
-          <div class="section-note">Confirmed name-matched transfers, this snapshot only</div>
+          <div class="section-note">Confirmed transfers this snapshot &mdash; name-matched, bio-matched, and site-flagged</div>
         </div>
         <div class="panel">
           <div class="transfer-net" id="transferNet"></div>
@@ -710,6 +710,67 @@ function isTransferExp(exp){
   return String(exp||"").trim().toUpperCase() === "TR";
 }
 
+/* Mirrors RosterScraperService.IsCorroborated - a bio-match only tells you the destination
+   player's own text names a tracked school, not that the specific same-named person found on
+   that school's roster is the same human, and a bare name match is the weakest evidence there
+   is (common names collide). So this only trusts a candidate found at the claimed origin when
+   at least one identity field (hometown or high school) actively agrees, and rejects it outright
+   on a regressed class year (a departing Sr can't reappear elsewhere as a Fr) or a contradicting
+   hometown/high school. A candidate with nothing comparable on either side - both blank - counts
+   as unconfirmed, not trusted: see the transfer-match audit for why. */
+function cityTokens(hometown){
+  if(!hometown) return new Set();
+  const city = String(hometown).split(",")[0].toLowerCase().replace(/[^a-z0-9\s]/g," ");
+  return new Set(city.split(/\s+/).filter(Boolean));
+}
+function highSchoolTokens(highSchool){
+  if(!highSchool) return new Set();
+  let hs = String(highSchool).toLowerCase().replace(/\(.*?\)/g," ").replace(/high school|senior high|\bhs\b/g," ");
+  hs = hs.replace(/[^a-z0-9\s]/g," ");
+  return new Set(hs.split(/\s+/).filter(Boolean));
+}
+function setsOverlap(a, b){
+  for(const x of a) if(b.has(x)) return true;
+  return false;
+}
+// "Agree" | "Conflict" | "Unknown"
+function compareTokenSets(a, b){
+  if(!a.size || !b.size) return "Unknown";
+  return setsOverlap(a,b) ? "Agree" : "Conflict";
+}
+const CLASS_RANK_PATTERNS = [
+  [/\b(gr|grad|graduate|5th|fifth|super\s*senior)\b/i, 5],
+  [/\b(sr|senior)\b/i, 4],
+  [/\b(jr|junior)\b/i, 3],
+  [/\b(so|sophomore)\b/i, 2],
+  [/\b(fr|fy|freshman|first[\s-]?year)\b/i, 1],
+];
+function classRank(cls){
+  const text = String(cls||"").trim();
+  if(!text) return null;
+  for(const [pattern, rank] of CLASS_RANK_PATTERNS) if(pattern.test(text)) return rank;
+  return null;
+}
+// A real transfer's class standing stays the same or advances next season; a parseable
+// regression (Sr -> Fr) is a name collision, not the same person.
+function compareClassRank(a, b){
+  const ra = classRank(a), rb = classRank(b);
+  if(ra == null || rb == null) return "Unknown";
+  return rb < ra ? "Conflict" : "Agree";
+}
+function isCorroborated(departed, arrived){
+  if(compareClassRank(departed.cls, arrived.cls) === "Conflict") return false;
+  const hometown = compareTokenSets(cityTokens(departed.hometown), cityTokens(arrived.hometown));
+  const highSchool = compareTokenSets(highSchoolTokens(departed.highSchool), highSchoolTokens(arrived.highSchool));
+  if(hometown === "Conflict" || highSchool === "Conflict") return false;
+  return hometown === "Agree" || highSchool === "Agree";
+}
+function findPlayerAtSchool(schools, schoolName, name){
+  const school = schools.find(s => s.name === schoolName);
+  if(!school) return null;
+  return school.players.find(p => p.name.toLowerCase() === name.toLowerCase()) || null;
+}
+
 /* ============ hometown -> state/region normalization ============ */
 const LOCATION_MAP = (() => {
   const m = {};
@@ -887,12 +948,22 @@ function computeConferenceAverages(confSchools, thisSchoolName){
   return { expIndex: expN ? expSum/expN : null, posAvgPerSchool, size, schoolCount: n };
 }
 
-/* Program.ClassifyDepartures name-matches a departing player against every school's New list by
-   name alone. Two different real people can share a common name ("Alex Smith") - older snapshots
-   (scraped before that logic was tightened to check for this) can have every Gone player sharing
-   such a name stamped with the same single unrelated arrival as their "destination". Since that
-   can't be told apart from a real match using only this data, any name with more than one Gone
-   occurrence this snapshot is excluded here rather than risk showing a wrong pairing. */
+/* Three ways an arrival gets confirmed here, mirroring buildEvents in transfer-portal.html -
+   this used to be name-match only, which is why it undercounted against that page's fuller
+   picture (see the transfer-match audit):
+   1. Name-match: Program.ClassifyDepartures matched a departing player's name to this
+      school's New list elsewhere in the same run. Two different real people can share a
+      common name ("Alex Smith") - any name with more than one Gone occurrence this
+      snapshot is excluded here rather than risk showing a wrong pairing.
+   2. Bio-match: a New player's own previous-school text (see classifyOrigin) names a
+      tracked program directly - D3 or non-D3 - regardless of whether that program was
+      rescraped this run. A same-named record found at the resolved origin still has to
+      pass isCorroborated (matching hometown/high school, no regressed class year) before
+      it's trusted - the same name-collision risk name-match's ambiguity guard exists for.
+   3. Exp-match: the site's own Cl./Exp. tag reads "TR" but neither pass above resolved an
+      origin - shown with from left null rather than guessed at.
+   Departures ("out") stay name-match only - there's no bio-match equivalent for "who left,"
+   since that signal only ever exists on the arriving player's own profile. */
 function computeTransfers(allSchools, school){
   const goneCountByName = new Map();
   allSchools.forEach(s=>{
@@ -907,14 +978,35 @@ function computeTransfers(allSchools, school){
     .map(p=>({name:p.name, dest:p.departureReason.slice("Transferred to ".length), position:p.position}));
 
   const inList = [];
+  const confirmedNames = new Set();
+
   allSchools.forEach(s=>{
     if(s.name === school.name) return;
     s.players.forEach(p=>{
       if(p.category==="Gone" && p.departureReason === `Transferred to ${school.name}` && !isAmbiguous(p.name)){
-        inList.push({name:p.name, from:s.name, position:p.position});
+        inList.push({name:p.name, from:s.name, division:null, position:p.position, source:"name-match"});
+        confirmedNames.add(p.name.toLowerCase());
       }
     });
   });
+
+  school.players.forEach(p=>{
+    if(p.category !== "New" || confirmedNames.has(p.name.toLowerCase())) return;
+    const origin = classifyOrigin(p, APP.nonD3Index, APP.d3Index);
+    if(origin && origin.matchedName !== school.name){
+      const originPlayer = findPlayerAtSchool(allSchools, origin.matchedName, p.name);
+      if(!originPlayer || isCorroborated(originPlayer, p)){
+        inList.push({name:p.name, from:origin.matchedName, division: origin.scope==="non-d3" ? origin.division : null, position:p.position, source:"bio-match"});
+        confirmedNames.add(p.name.toLowerCase());
+        return;
+      }
+    }
+    if(isTransferExp(p.experience)){
+      inList.push({name:p.name, from:null, division:null, position:p.position, source:"exp-match"});
+      confirmedNames.add(p.name.toLowerCase());
+    }
+  });
+
   return {in: inList, out};
 }
 
@@ -1056,7 +1148,11 @@ function renderTeam(school, allSchools){
   xfer.in.forEach(t=>{
     const d = document.createElement("div");
     d.className = "transfer-item";
-    d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">from ${escapeHtml(t.from)}</span>`;
+    const divisionBadge = t.division ? ` <span class="origin-badge" title="Not a tracked D3 program - best-effort match, not confirmed">${escapeHtml(DIVISION_LABEL[t.division])}</span>` : "";
+    const whereHtml = t.from
+      ? `from ${escapeHtml(t.from)}${divisionBadge}`
+      : `<span title="Source site's own Cl./Exp. tag reads TR - confirmed transfer, but no resolvable previous school">from unknown school</span>`;
+    d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">${whereHtml}</span>`;
     inEl.appendChild(d);
   });
   const outEl = document.getElementById("transferOut"); outEl.innerHTML = "";
