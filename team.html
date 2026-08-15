@@ -545,22 +545,28 @@ async function loadNonD3Schools(){
    indexes "Mount Union"), since bios commonly drop whichever half is redundant. This is a
    deterministic transform, not a hand-authored abbreviation guess - it won't catch a
    state-system short form like "UW-Whitewater" or a pure initialism like "UMHB", only a
-   suffix/prefix drop. Either stripped variant is skipped when it collapses to a single word
-   ("Ithaca College" -> "Ithaca", "Elmira College" -> "Elmira") - that's just the town/founder
-   the school is named after, and a bio candidate equal to a bare town name is far more likely
-   someone's hometown than this school with the suffix dropped. Multi-word strips stay safe to
-   keep. A handful of real initialisms that keep showing up in bios and can't be derived
-   mechanically (UMHB, UTPB, UTRGV, UNT, ENMU) are hand-mapped separately below rather than
-   guessed at generically - a generic initialism generator would recreate the exact false-
-   positive risk the town-collision guard above exists to prevent. */
+   suffix/prefix drop.
+
+   A stripped variant is no longer blocked just for collapsing to a single word ("Washburn
+   University" -> "Washburn", "Graceland University" -> "Graceland"). That guard existed back
+   when a candidate could come from the whole free-text highSchool field, where a bare word
+   was ambiguous between "this is the school" and "this is coincidentally also a real high
+   school's name" (see the Hamilton/Manchester/Eureka false positives in the transfer-match
+   audit). previousSchoolCandidates no longer trusts that whole field - every candidate it
+   returns now comes from a structurally dedicated position (the previousSchool field itself,
+   or a trailing parenthetical / "/" split this template convention only ever uses to mean
+   "previous school"). A bare word arriving through one of those positions is a self-report,
+   not a coincidence, so it's exactly as trustworthy as a multi-word one now. A handful of real
+   initialisms that keep showing up in bios and can't be derived mechanically (UMHB, UTPB,
+   UTRGV, UNT, ENMU) are hand-mapped separately below. */
 function addSchoolAliases(map, name, entry){
   const add = (variant) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
   add(name);
   const trailingStripped = name.replace(/\s+(university|college)\s*$/i, "").trim();
-  if(trailingStripped && trailingStripped.toLowerCase() !== name.toLowerCase() && trailingStripped.includes(" "))
+  if(trailingStripped && trailingStripped.toLowerCase() !== name.toLowerCase())
     add(trailingStripped);
   const leadingStripped = name.replace(/^\s*university of\s+/i, "").trim();
-  if(leadingStripped && leadingStripped.toLowerCase() !== name.toLowerCase() && leadingStripped.includes(" "))
+  if(leadingStripped && leadingStripped.toLowerCase() !== name.toLowerCase())
     add(leadingStripped);
   const extra = MANUAL_SCHOOL_ALIASES[name];
   if(extra) extra.forEach(add);
@@ -579,9 +585,10 @@ const MANUAL_SCHOOL_ALIASES = {
 
 /* Juco names additionally get "X CC" / "X JC" / "X Community College" variants, since roster
    bios abbreviate juco names far more inconsistently than four-year schools. The bare "X" form
-   is only added when it's multi-word, for the same town-collision reason as addSchoolAliases
-   above ("Tyler Junior College" -> "Tyler" is skipped; "Tyler" alone in a bio is someone's
-   hometown, not a match). */
+   is included on the same footing as the rest of addSchoolAliases now - see its comment for
+   why a single-word candidate reached through a structured position (previousSchool field,
+   trailing parenthetical, "/" split) is trustworthy, not a coincidental town-name collision
+   ("Tyler Junior College" -> "Tyler" was previously withheld for exactly that reason). */
 function buildNonD3Index(schools){
   const map = new Map();
   const add = (variant, entry) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
@@ -591,7 +598,7 @@ function buildNonD3Index(schools){
     if(JUCO_DIVISIONS.has(s.division)){
       const base = s.name.replace(/\s+(community college|junior college|college)\s*$/i, "").trim();
       if(base && base.toLowerCase() !== s.name.toLowerCase()){
-        if(base.includes(" ")) add(base, entry);
+        add(base, entry);
         add(base + " CC", entry);
         add(base + " JC", entry);
         add(base + " Community College", entry);
