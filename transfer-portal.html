@@ -46,6 +46,22 @@
   }
   .data-note b{color:var(--chalk);}
 
+  .filter-bar{
+    display:none;align-items:center;gap:12px;
+    background:rgba(201,162,39,0.1);border:1px solid var(--gold);
+    padding:10px 16px;border-radius:2px;margin-bottom:28px;
+    font-family:var(--mono);font-size:12.5px;
+    position:sticky;top:12px;z-index:25;
+    backdrop-filter:blur(6px);
+  }
+  .filter-bar.show{display:flex;flex-wrap:wrap;}
+  .filter-label{color:var(--chalk);}
+  .filter-label b{color:var(--gold-bright);}
+  .crumb{color:var(--muted);cursor:pointer;text-decoration:none;}
+  .crumb:hover{color:var(--gold-bright);}
+  .crumb.current{color:var(--gold-bright);cursor:default;font-weight:700;}
+  .crumb-sep{color:var(--muted);margin:0 2px;}
+
   section{margin-bottom:52px;}
   .section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px;}
   h2{font-family:var(--display);font-size:22px;text-transform:uppercase;letter-spacing:0.03em;margin:0;}
@@ -72,7 +88,6 @@
   .event-who .pos{color:var(--muted);font-family:var(--mono);font-size:11px;font-weight:400;margin-left:6px;}
   .event-path{font-family:var(--mono);font-size:11.5px;color:var(--muted);text-align:right;white-space:nowrap;}
   .event-path b{color:var(--chalk);}
-  .log-divider{border-top:1px solid var(--line);margin:18px 0 14px;padding-top:16px;}
   .log-title{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px;}
 
   /* diverging net-margin bars */
@@ -160,6 +175,8 @@
   .cell-name{font-weight:600;}
   .mono-cell{font-family:var(--mono);font-size:12px;color:var(--muted);}
   .list-empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:16px 4px;}
+  .filter-link{cursor:pointer;transition:color .12s;}
+  .filter-link:hover{color:var(--gold-bright);}
   .origin-badge{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;
     padding:2px 6px;border-radius:9px;display:inline-block;white-space:nowrap;cursor:help;
     background:rgba(122,147,166,0.18);color:#9DB8C9;}
@@ -191,6 +208,11 @@
     <div class="data-note" id="dataNote"></div>
   </div>
 
+  <div class="filter-bar" id="filterBar">
+    <span class="filter-label" id="filterCrumbs"></span>
+    <button class="filter-clear" id="filterBarClearBtn" style="margin-left:auto;">Clear &#10005;</button>
+  </div>
+
   <section>
     <div class="section-head">
       <h2>Conference-to-Conference Flow</h2>
@@ -198,7 +220,6 @@
     </div>
     <div class="panel">
       <div id="confFlowBars"></div>
-      <div id="confirmedLog"></div>
     </div>
   </section>
 
@@ -243,7 +264,7 @@
     <section>
       <div class="section-head">
         <h2>Net Margin &middot; Schools</h2>
-        <div class="section-note">Confirmed transfers in minus out &middot; click a school for its profile</div>
+        <div class="section-note">Confirmed transfers in minus out</div>
       </div>
       <div class="panel">
         <div id="netSchoolBars"></div>
@@ -311,6 +332,16 @@
         <span data-sort="toSchool">To</span>
       </div>
       <div id="listBody"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <h2>Confirmed Transfer Log</h2>
+      <div class="section-note">Every confirmed transfer, one line each</div>
+    </div>
+    <div class="panel">
+      <div id="confirmedLog"></div>
     </div>
   </section>
 
@@ -727,6 +758,95 @@ let listPosRowEls = {}, listPosCountEls = {}, listPosGroupEls = [];
 
 function fmtPct(n){ return n==null ? "&mdash;" : Math.round(n) + "%"; }
 
+/* ============ page-wide school/conference filter ============ */
+/* Everything below the hero (which stays global, for overall-snapshot context) reacts to this -
+   clicking a school or conference name in any table sets it here and re-renders the rest of
+   the page scoped to it. Mirrors index.html's STATE.selectedConference/selectedSchool pattern. */
+const STATE = { selectedConference: null, selectedSchool: null };
+
+function getScopedSchools(){
+  let list = APP.schools;
+  if(STATE.selectedConference) list = list.filter(s=>s.confName===STATE.selectedConference);
+  if(STATE.selectedSchool) list = list.filter(s=>s.name===STATE.selectedSchool);
+  return list;
+}
+
+/* "Involves" rather than "originates from" - a conference filter matches transfers moving
+   either into or out of it, not just out, since both directions are relevant context. */
+function eventInScope(e){
+  if(STATE.selectedSchool && e.fromSchool!==STATE.selectedSchool && e.toSchool!==STATE.selectedSchool) return false;
+  if(STATE.selectedConference && e.fromConf!==STATE.selectedConference && e.toConf!==STATE.selectedConference) return false;
+  return true;
+}
+function getScopedEvents(){ return APP.events.filter(eventInScope); }
+
+function nonD3RowInScope(r){
+  if(STATE.selectedSchool && r.school!==STATE.selectedSchool) return false;
+  if(STATE.selectedConference && r.confName!==STATE.selectedConference) return false;
+  return true;
+}
+function getScopedNonD3Rows(){ return nonD3Rows.filter(nonD3RowInScope); }
+
+function setConferenceFilter(confName){
+  if(STATE.selectedConference === confName && !STATE.selectedSchool){
+    STATE.selectedConference = null;
+  } else {
+    STATE.selectedConference = confName;
+    STATE.selectedSchool = null;
+  }
+  renderScoped();
+}
+
+function setSchoolFilter(schoolName){
+  if(STATE.selectedSchool === schoolName){
+    STATE.selectedSchool = null;
+  } else {
+    STATE.selectedSchool = schoolName;
+    const school = APP.byName.get(schoolName.toLowerCase());
+    if(school) STATE.selectedConference = school.confName;
+  }
+  renderScoped();
+}
+
+function renderFilterBar(){
+  const bar = document.getElementById('filterBar');
+  const crumbsEl = document.getElementById('filterCrumbs');
+  const selConf = STATE.selectedConference, selSchool = STATE.selectedSchool;
+
+  if(!selConf && !selSchool){ bar.classList.remove('show'); return; }
+  bar.classList.add('show');
+
+  let html = `<a class="crumb" data-level="all">All Conferences</a>`;
+  if(selSchool){
+    html += `<span class="crumb-sep">›</span><a class="crumb" data-level="conf">${escapeHtml(selConf)}</a>`;
+    html += `<span class="crumb-sep">›</span><span class="crumb current">${escapeHtml(selSchool)}</span>`;
+    html += `<span class="crumb-sep">·</span><a class="crumb" href="team.html?school=${encodeURIComponent(selSchool)}" style="color:var(--gold-bright);font-weight:700;">Team Profile &rarr;</a>`;
+  } else if(selConf){
+    html += `<span class="crumb-sep">›</span><span class="crumb current">${escapeHtml(selConf)}</span>`;
+  }
+  crumbsEl.innerHTML = html;
+  crumbsEl.querySelectorAll('.crumb[data-level]').forEach(c=>{
+    c.addEventListener('click', ()=>{
+      if(c.dataset.level==="all"){ STATE.selectedConference=null; STATE.selectedSchool=null; }
+      else if(c.dataset.level==="conf"){ STATE.selectedSchool=null; }
+      renderScoped();
+    });
+  });
+}
+
+/* One delegated listener per table body handles every school/conference click in it, since
+   rows are replaced wholesale on every re-render - re-binding per row on every render would
+   work too, but this stays correct with zero re-binding. */
+function bindFilterClicks(containerEl){
+  if(!containerEl) return;
+  containerEl.addEventListener('click', (e)=>{
+    const schoolEl = e.target.closest('[data-filter-school]');
+    if(schoolEl){ setSchoolFilter(schoolEl.dataset.filterSchool); return; }
+    const confEl = e.target.closest('[data-filter-conf]');
+    if(confEl){ setConferenceFilter(confEl.dataset.filterConf); return; }
+  });
+}
+
 function renderHero(data, schools, events, totalGone){
   const resolved = events.filter(e=>e.toResolved);
   const cross = resolved.filter(e=>e.fromConf!==e.toConf).length;
@@ -756,36 +876,38 @@ function renderHero(data, schools, events, totalGone){
   document.getElementById('lastUpdatedFoot').textContent = data.lastUpdated || "unknown";
 }
 
-function renderConfFlow(events){
+function renderConfFlowBars(events){
   const pairs = computeConfPairs(events);
   const el = document.getElementById('confFlowBars');
   if(!pairs.length){
-    el.innerHTML = `<div class="empty-note">No confirmed cross-school transfers with a resolvable destination yet &mdash; this fills in as more conferences are scraped together in the same run.</div>`;
+    el.innerHTML = `<div class="empty-note">No confirmed cross-school transfers with a resolvable destination match the current filter &mdash; this fills in as more conferences are scraped together in the same run.</div>`;
   } else {
     renderMagnitudeBars(el, pairs.slice(0,20),
       p => p.within ? `${escapeHtml(p.fromConf)} <span class="within-tag">(within conference)</span>` : `${escapeHtml(p.fromConf)} &rarr; ${escapeHtml(p.toConf)}`,
       p => p.count);
   }
+}
 
+function renderConfirmedLog(events){
   const logEl = document.getElementById('confirmedLog');
-  if(!events.length){ logEl.innerHTML = ""; return; }
+  if(!events.length){ logEl.innerHTML = `<div class="list-empty">No confirmed transfers match the current filter.</div>`; return; }
   // Name-match events are all appended before bio-match ones (see buildEvents), so this sorts
   // by player name first - otherwise a slice(0,500) would show name-match events almost
   // exclusively whenever there happen to be 500+ of them.
   const sorted = [...events].sort((a,b)=>a.name.localeCompare(b.name));
   const shown = sorted.slice(0,500);
-  logEl.innerHTML = `<div class="log-divider"><div class="log-title">Confirmed Transfer Log${events.length>500?' (first 500)':''}</div>${
+  logEl.innerHTML = `${events.length>500?`<div class="net-cap-note">Showing first 500 of ${events.length}.</div>`:''}${
     shown.map(e=>`<div class="event-row">
       <div class="event-who">${escapeHtml(e.name)}<span class="pos">${escapeHtml(e.position)}</span></div>
-      <div class="event-path"><b>${escapeHtml(e.fromSchool)}</b> &rarr; <b>${escapeHtml(e.toResolved ? e.toSchool : (e.toSchool + ' (unmatched)'))}</b>${e.source==="bio-match" ? ' <span class="origin-badge" title="Confirmed from the incoming player\'s own previous-school text, not a name cross-reference">via bio</span>' : ''}</div>
+      <div class="event-path"><b class="filter-link" data-filter-school="${escapeHtml(e.fromSchool)}">${escapeHtml(e.fromSchool)}</b> &rarr; <b${e.toResolved ? ` class="filter-link" data-filter-school="${escapeHtml(e.toSchool)}"` : ''}>${escapeHtml(e.toResolved ? e.toSchool : (e.toSchool + ' (unmatched)'))}</b>${e.source==="bio-match" ? ' <span class="origin-badge" title="Confirmed from the incoming player\'s own previous-school text, not a name cross-reference">via bio</span>' : ''}</div>
     </div>`).join("")
-  }</div>`;
+  }`;
 }
 
 function renderNetMargins(schoolAgg, confAgg){
   const confRows = [...confAgg.values()].map(c=>({name:c.name, net:c.in-c.out}))
     .sort((a,b)=>b.net-a.net || a.name.localeCompare(b.name));
-  renderDivergingBars(document.getElementById('netConfBars'), confRows, r=>r.name, r=>r.net, null);
+  renderDivergingBars(document.getElementById('netConfBars'), confRows, r=>r.name, r=>r.net, setConferenceFilter);
 
   const schoolRowsAll = [...schoolAgg.values()]
     .filter(s=>s.in>0 || s.out>0)
@@ -796,12 +918,13 @@ function renderNetMargins(schoolAgg, confAgg){
   const capNoteEl = document.getElementById('netSchoolCapNote');
   if(schoolRowsAll.length > 30){
     schoolRows = [...schoolRowsAll.slice(0,15), ...schoolRowsAll.slice(-15)];
-    capNoteEl.textContent = `Showing the top 15 and bottom 15 of ${schoolRowsAll.length} schools with confirmed transfer activity.`;
+    capNoteEl.textContent = `Click a school to filter the page to it. Showing the top 15 and bottom 15 of ${schoolRowsAll.length} schools with confirmed transfer activity.`;
+  } else if(schoolRowsAll.length){
+    capNoteEl.textContent = "Click a school to filter the page to it.";
   } else {
     capNoteEl.textContent = "";
   }
-  renderDivergingBars(document.getElementById('netSchoolBars'), schoolRows, r=>r.name, r=>r.net,
-    (name)=>{ window.location.href = `team.html?school=${encodeURIComponent(name)}`; });
+  renderDivergingBars(document.getElementById('netSchoolBars'), schoolRows, r=>r.name, r=>r.net, setSchoolFilter);
 }
 
 function renderConfActivityTable(confAgg){
@@ -814,7 +937,7 @@ function renderConfActivityTable(confAgg){
       : net>0 ? `<span style="color:var(--gold-bright)">+${net}</span>`
       : `<span style="color:var(--rust-bright)">${net}</span>`;
     html += `<tr>
-      <td>${escapeHtml(c.name)}</td>
+      <td class="filter-link" data-filter-conf="${escapeHtml(c.name)}">${escapeHtml(c.name)}</td>
       <td class="num">${c.schoolCount}</td>
       <td class="num">${c.out}</td>
       <td class="num">${c.in}</td>
@@ -832,13 +955,15 @@ function listSortValue(e, col){
 }
 
 function listRowHtml(e){
-  const toHtml = `${escapeHtml(e.toSchool)}${!e.toResolved ? ' <span style="color:var(--stale)">(unmatched)</span>' : ''}`;
+  const toHtml = e.toResolved
+    ? `<span class="filter-link" data-filter-school="${escapeHtml(e.toSchool)}">${escapeHtml(e.toSchool)}</span>`
+    : `${escapeHtml(e.toSchool)} <span style="color:var(--stale)">(unmatched)</span>`;
   return `<div class="row">
     <div class="cell-name">${escapeHtml(e.name)}</div>
     <div class="mono-cell">${escapeHtml(e.position) || '&mdash;'}</div>
     <div class="mono-cell">${escapeHtml(e.cls) || '&mdash;'}</div>
-    <div class="mono-cell">${escapeHtml(e.fromSchool)}</div>
-    <div class="mono-cell">${escapeHtml(e.fromConf)}</div>
+    <div class="mono-cell filter-link" data-filter-school="${escapeHtml(e.fromSchool)}">${escapeHtml(e.fromSchool)}</div>
+    <div class="mono-cell filter-link" data-filter-conf="${escapeHtml(e.fromConf)}">${escapeHtml(e.fromConf)}</div>
     <div class="mono-cell">${toHtml}</div>
   </div>`;
 }
@@ -918,7 +1043,7 @@ function updateListSortHeaders(){
 
 function getNonPositionFilteredList(){
   const search = listFilter.search.trim().toLowerCase();
-  return APP.events.filter(e=>{
+  return getScopedEvents().filter(e=>{
     if(listFilter.fromConf!=="all" && e.fromConf!==listFilter.fromConf) return false;
     if(listFilter.toConf==="__unmatched__"){ if(e.toResolved) return false; }
     else if(listFilter.toConf!=="all" && e.toConf!==listFilter.toConf) return false;
@@ -943,7 +1068,7 @@ function drawList(){
   });
   updateListSortHeaders();
 
-  document.getElementById('listNote').textContent = `${list.length} of ${APP.events.length} confirmed transfers`;
+  document.getElementById('listNote').textContent = `${list.length} of ${getScopedEvents().length} confirmed transfers`;
   const body = document.getElementById('listBody');
   if(!list.length){
     body.innerHTML = `<div class="list-empty">No departures match the current filters.</div>`;
@@ -1017,8 +1142,8 @@ function nonD3RowHtml(r){
     <div class="cell-name">${escapeHtml(r.name)}</div>
     <div class="mono-cell">${escapeHtml(r.position) || '&mdash;'}</div>
     <div class="mono-cell">${escapeHtml(r.cls) || '&mdash;'}</div>
-    <div class="mono-cell">${escapeHtml(r.school)}</div>
-    <div class="mono-cell">${escapeHtml(r.confName)}</div>
+    <div class="mono-cell filter-link" data-filter-school="${escapeHtml(r.school)}">${escapeHtml(r.school)}</div>
+    <div class="mono-cell filter-link" data-filter-conf="${escapeHtml(r.confName)}">${escapeHtml(r.confName)}</div>
     <div class="mono-cell">${escapeHtml(r.originName)} <span class="origin-badge" title="Matched text: &quot;${escapeHtml(r.originText)}&quot; — best-effort match, not confirmed">${escapeHtml(DIVISION_LABEL[r.division])}</span></div>
   </div>`;
 }
@@ -1039,7 +1164,7 @@ function updateNonD3SortHeaders(){
 
 function getFilteredNonD3(){
   const search = nonD3Filter.search.trim().toLowerCase();
-  return nonD3Rows.filter(r=>{
+  return getScopedNonD3Rows().filter(r=>{
     if(nonD3Filter.division!=="all" && r.division!==nonD3Filter.division) return false;
     if(nonD3Filter.conf!=="all" && r.confName!==nonD3Filter.conf) return false;
     if(search){
@@ -1060,7 +1185,7 @@ function drawNonD3List(){
   updateNonD3SortHeaders();
 
   document.getElementById('nonD3Count').textContent =
-    `${list.length} of ${nonD3Rows.length} New players whose previous-school text matches a tracked non-D3 program`;
+    `${list.length} of ${getScopedNonD3Rows().length} New players whose previous-school text matches a tracked non-D3 program`;
   const body = document.getElementById('nonD3ListBody');
   body.innerHTML = list.length ? list.map(nonD3RowHtml).join("") : `<div class="list-empty">No matches for the current filters.</div>`;
 }
@@ -1110,6 +1235,30 @@ function initNonD3Controls(){
   });
 }
 
+/* ============ scoped re-render (hero excluded - stays whole-snapshot context) ============ */
+function renderScoped(){
+  renderFilterBar();
+
+  const scopedSchools = getScopedSchools();
+  const scopedEvents = getScopedEvents();
+
+  renderConfFlowBars(scopedEvents);
+  renderConfirmedLog(scopedEvents);
+
+  const schoolAgg = aggregateBySchool(scopedEvents, scopedSchools);
+  const confAgg = aggregateByConference(schoolAgg, scopedSchools);
+  renderNetMargins(schoolAgg, confAgg);
+
+  renderPositionVolumeChart(document.getElementById('posVolumeChart'), scopedEvents);
+  renderClassVolumeChart(document.getElementById('classVolumeChart'), scopedEvents);
+  renderConfActivityTable(confAgg);
+
+  renderNonD3DivisionBars(getScopedNonD3Rows());
+  drawNonD3List();
+
+  drawList();
+}
+
 /* ============ boot ============ */
 Promise.all([loadData(), loadNonD3Schools()]).then(([data, nonD3Schools])=>{
   const schools = flattenSchools(data);
@@ -1122,24 +1271,22 @@ Promise.all([loadData(), loadNonD3Schools()]).then(([data, nonD3Schools])=>{
 
   APP.data = data; APP.schools = schools; APP.byName = byName;
   APP.events = events; APP.totalGone = totalGone;
-
-  const schoolAgg = aggregateBySchool(events, schools);
-  const confAgg = aggregateByConference(schoolAgg, schools);
+  nonD3Rows = findNonD3Incoming(schools, nonD3Index, d3Index);
 
   renderHero(data, schools, events, totalGone);
-  renderConfFlow(events);
-  renderNetMargins(schoolAgg, confAgg);
-  renderPositionVolumeChart(document.getElementById('posVolumeChart'), events);
-  renderClassVolumeChart(document.getElementById('classVolumeChart'), events);
-  renderConfActivityTable(confAgg);
 
-  nonD3Rows = findNonD3Incoming(schools, nonD3Index, d3Index);
-  renderNonD3DivisionBars(nonD3Rows);
   initNonD3Controls();
-  drawNonD3List();
-
   initListControls();
-  drawList();
+  bindFilterClicks(document.getElementById('confActivityTable'));
+  bindFilterClicks(document.getElementById('nonD3ListBody'));
+  bindFilterClicks(document.getElementById('listBody'));
+  bindFilterClicks(document.getElementById('confirmedLog'));
+  document.getElementById('filterBarClearBtn').addEventListener('click', ()=>{
+    STATE.selectedConference = null; STATE.selectedSchool = null;
+    renderScoped();
+  });
+
+  renderScoped();
 }).catch(err=>{
   document.getElementById('statRow').innerHTML = "";
   document.getElementById('dataNote').innerHTML = `Couldn't load roster data: ${escapeHtml(err.message)}`;
