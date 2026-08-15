@@ -543,16 +543,23 @@ async function loadNonD3Schools(){
    "University"/"College" stripped ("North Dakota State University" -> also indexes "North
    Dakota State"), since bios commonly drop that suffix. This is a deterministic transform, not
    a hand-authored abbreviation guess - it won't catch a state-system short form like
-   "UW-Whitewater", only a suffix drop. */
+   "UW-Whitewater", only a suffix drop. The stripped variant is skipped when it collapses to a
+   single word ("Ithaca College" -> "Ithaca", "Elmira College" -> "Elmira") - that's just the
+   town/founder the school is named after, and a bio candidate equal to a bare town name is far
+   more likely someone's hometown than this school with the suffix dropped. Multi-word strips
+   stay safe to keep. */
 function addSchoolAliases(map, name, entry){
   const add = (variant) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
   add(name);
   const stripped = name.replace(/\s+(university|college)\s*$/i, "").trim();
-  if(stripped && stripped.toLowerCase() !== name.toLowerCase()) add(stripped);
+  if(stripped && stripped.toLowerCase() !== name.toLowerCase() && stripped.includes(" ")) add(stripped);
 }
 
 /* Juco names additionally get "X CC" / "X JC" / "X Community College" variants, since roster
-   bios abbreviate juco names far more inconsistently than four-year schools. */
+   bios abbreviate juco names far more inconsistently than four-year schools. The bare "X" form
+   is only added when it's multi-word, for the same town-collision reason as addSchoolAliases
+   above ("Tyler Junior College" -> "Tyler" is skipped; "Tyler" alone in a bio is someone's
+   hometown, not a match). */
 function buildNonD3Index(schools){
   const map = new Map();
   const add = (variant, entry) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
@@ -562,7 +569,7 @@ function buildNonD3Index(schools){
     if(JUCO_DIVISIONS.has(s.division)){
       const base = s.name.replace(/\s+(community college|junior college|college)\s*$/i, "").trim();
       if(base && base.toLowerCase() !== s.name.toLowerCase()){
-        add(base, entry);
+        if(base.includes(" ")) add(base, entry);
         add(base + " CC", entry);
         add(base + " JC", entry);
         add(base + " Community College", entry);
@@ -612,6 +619,13 @@ function classifyOrigin(p, nonD3Index, d3Index){
     if(hit) return {text:candidate, matchedName:hit.name, matchedConf:null, scope:"non-d3", division:hit.division};
   }
   return null;
+}
+
+/* A roster site's own Cl./Exp. eligibility tag (see RosterScraperService.NormalizeExperienceTag)
+   reads "TR" when the site itself marks a player a transfer - independent of, and stronger than,
+   any text we infer ourselves. */
+function isTransferExp(exp){
+  return String(exp||"").trim().toUpperCase() === "TR";
 }
 
 /* ============ hometown -> state/region normalization ============ */
@@ -1001,9 +1015,12 @@ function rosterRowHtml(p, cat){
   } else {
     const displayText = p.highSchool || p.previousSchool || "";
     const origin = classifyOrigin(p, APP.nonD3Index, APP.d3Index);
-    const originBadge = origin && origin.scope==="non-d3"
-      ? ` <span class="origin-badge" title="${escapeHtml(origin.matchedName + " — best-effort match, not confirmed")}">${escapeHtml(DIVISION_LABEL[origin.division])}</span>`
-      : '';
+    let originBadge = '';
+    if(origin && origin.scope==="non-d3"){
+      originBadge = ` <span class="origin-badge" title="${escapeHtml(origin.matchedName + " — best-effort match, not confirmed")}">${escapeHtml(DIVISION_LABEL[origin.division])}</span>`;
+    } else if(!origin && cat==="New" && isTransferExp(p.experience)){
+      originBadge = ` <span class="origin-badge" title="Source site's own Cl./Exp. tag reads TR - confirmed transfer, but no resolvable previous school">Transfer</span>`;
+    }
     statusHtml = `<span class="mono-cell">${escapeHtml(displayText)}${originBadge}</span>`;
   }
   return `<div class="row">

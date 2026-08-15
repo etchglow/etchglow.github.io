@@ -467,16 +467,23 @@ async function loadNonD3Schools(){
    "University"/"College" stripped ("North Dakota State University" -> also indexes "North
    Dakota State"), since bios commonly drop that suffix. This is a deterministic transform, not
    a hand-authored abbreviation guess - it won't catch a state-system short form like
-   "UW-Whitewater", only a suffix drop. */
+   "UW-Whitewater", only a suffix drop. The stripped variant is skipped when it collapses to a
+   single word ("Ithaca College" -> "Ithaca", "Elmira College" -> "Elmira") - that's just the
+   town/founder the school is named after, and a bio candidate equal to a bare town name is far
+   more likely someone's hometown than this school with the suffix dropped. Multi-word strips
+   stay safe to keep. */
 function addSchoolAliases(map, name, entry){
   const add = (variant) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
   add(name);
   const stripped = name.replace(/\s+(university|college)\s*$/i, "").trim();
-  if(stripped && stripped.toLowerCase() !== name.toLowerCase()) add(stripped);
+  if(stripped && stripped.toLowerCase() !== name.toLowerCase() && stripped.includes(" ")) add(stripped);
 }
 
 /* Juco names additionally get "X CC" / "X JC" / "X Community College" variants, since roster
-   bios abbreviate juco names far more inconsistently than four-year schools. */
+   bios abbreviate juco names far more inconsistently than four-year schools. The bare "X" form
+   is only added when it's multi-word, for the same town-collision reason as addSchoolAliases
+   above ("Tyler Junior College" -> "Tyler" is skipped; "Tyler" alone in a bio is someone's
+   hometown, not a match). */
 function buildNonD3Index(schools){
   const map = new Map();
   const add = (variant, entry) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
@@ -486,7 +493,7 @@ function buildNonD3Index(schools){
     if(JUCO_DIVISIONS.has(s.division)){
       const base = s.name.replace(/\s+(community college|junior college|college)\s*$/i, "").trim();
       if(base && base.toLowerCase() !== s.name.toLowerCase()){
-        add(base, entry);
+        if(base.includes(" ")) add(base, entry);
         add(base + " CC", entry);
         add(base + " JC", entry);
         add(base + " Community College", entry);
@@ -556,8 +563,15 @@ function findNonD3Incoming(schools, nonD3Index, d3Index){
   return rows;
 }
 
+/* A roster site's own Cl./Exp. eligibility tag (see RosterScraperService.NormalizeExperienceTag)
+   reads "TR" when the site itself marks a player a transfer - independent of, and stronger than,
+   any text we infer ourselves. */
+function isTransferExp(exp){
+  return String(exp||"").trim().toUpperCase() === "TR";
+}
+
 /* ============ transfer event model ============ */
-/* Two independent ways a transfer gets confirmed, merged into one event list:
+/* Three independent ways a transfer gets confirmed, merged into one event list:
    1. Name-match (mirrors Program.ClassifyDepartures): a "Gone" player's DepartureReason
       reads "Transferred to X" only when their name was matched against another tracked
       school's New list in the same run - misses any transfer where the origin school
@@ -568,9 +582,14 @@ function findNonD3Incoming(schools, nonD3Index, d3Index){
       "Returning" - a returning player's bio still names the same old previous school
       every snapshot, and re-matching it each time would manufacture a "new" transfer
       that isn't news.
+   3. Exp-match: a "New" player's Cl./Exp. tag itself reads "TR" (see isTransferExp), but
+      neither pass above could resolve where they came from - the school's own bio text
+      might just be blank, or name a program outside both tracked indexes. Recorded with
+      fromSchool/fromConf left null rather than guessed at, and every renderer below treats
+      a null fromSchool as "unknown origin" instead of crashing or showing the word "null".
    Everything else (graduated guesses, unmatched departures, players from schools that
    weren't part of a fresh diff) is left out entirely - this page only shows confirmed
-   transfers, one event per player even when both passes would otherwise catch them. */
+   transfers, one event per player even when multiple passes would otherwise catch them. */
 function buildEvents(schools, byName, nonD3Index, d3Index){
   const events = [];
   const confirmedKeys = new Set(); // `${player}||${toSchool}`, lowercased
@@ -627,6 +646,20 @@ function buildEvents(schools, byName, nonD3Index, d3Index){
     });
   });
 
+  schools.forEach(s=>{
+    s.players.forEach(p=>{
+      if(p.category !== "New" || !isTransferExp(p.experience)) return;
+      const key = p.name.toLowerCase() + "||" + s.name.toLowerCase();
+      if(confirmedKeys.has(key)) return;
+      confirmedKeys.add(key);
+      events.push({
+        name: p.name, position: p.position || "", positionKey: positionFilterKey((p.position||"").toUpperCase().trim()),
+        cls: p.cls, fromSchool: null, fromConf: null,
+        toSchool: s.name, toConf: s.confName, toResolved: true, source: "exp-match"
+      });
+    });
+  });
+
   return {events, totalGone};
 }
 
@@ -661,7 +694,7 @@ function aggregateByConference(schoolAgg, schools){
 function computeConfPairs(events){
   const map = new Map();
   events.forEach(e=>{
-    if(!e.toResolved) return;
+    if(!e.toResolved || !e.fromConf) return;
     const key = e.fromConf + "→" + e.toConf;
     if(!map.has(key)) map.set(key, {fromConf:e.fromConf, toConf:e.toConf, count:0, within: e.fromConf===e.toConf});
     map.get(key).count++;
@@ -900,13 +933,15 @@ function initTabs(){
 }
 
 function renderHero(data, schools, events, totalGone){
-  const resolved = events.filter(e=>e.toResolved);
+  // Exp-match events (fromConf null - see buildEvents) have no origin conference to compare
+  // against, so they're excluded here rather than counting as "left their conference".
+  const resolved = events.filter(e=>e.toResolved && e.fromConf);
   const cross = resolved.filter(e=>e.fromConf!==e.toConf).length;
   const within = resolved.length - cross;
   const crossPct = resolved.length ? cross/resolved.length*100 : null;
   const withinPct = resolved.length ? within/resolved.length*100 : null;
   const schoolsInvolved = new Set();
-  events.forEach(e=>{ schoolsInvolved.add(e.fromSchool); if(e.toResolved) schoolsInvolved.add(e.toSchool); });
+  events.forEach(e=>{ if(e.fromSchool) schoolsInvolved.add(e.fromSchool); if(e.toResolved) schoolsInvolved.add(e.toSchool); });
 
   // Best-effort, not confirmed - same population as the Outside D3 tab (nonD3Rows), so this
   // stays unaffected by the page-wide school/conference filter just like the rest of the hero.
@@ -930,8 +965,9 @@ function renderHero(data, schools, events, totalGone){
   const resolvedFromGone = events.filter(e=>e.source==="name-match" && e.toResolved).length;
   const unconfirmed = Math.max(0, totalGone - resolvedFromGone);
   const bioMatchCount = events.filter(e=>e.source==="bio-match").length;
+  const expMatchCount = events.filter(e=>e.source==="exp-match").length;
   document.getElementById('dataNote').innerHTML =
-    `<span>&#9432;</span><span>A transfer is confirmed here either by name cross-reference (a departing player matched to another tracked school's New list) or by an incoming player's own bio naming their previous D3 school${bioMatchCount ? ` (${bioMatchCount.toLocaleString()} of the transfers above came from bio text alone)` : ""}. ${unconfirmed.toLocaleString()} other departed players aren't shown at all: most graduated, left for a program outside this tracker, or their school wasn't part of a fresh diff this snapshot.</span>`;
+    `<span>&#9432;</span><span>A transfer is confirmed here by name cross-reference (a departing player matched to another tracked school's New list), by an incoming player's own bio naming their previous D3 school${bioMatchCount ? ` (${bioMatchCount.toLocaleString()} of the transfers above came from bio text alone)` : ""}, or by the source site's own Cl./Exp. eligibility tag reading "TR"${expMatchCount ? ` (${expMatchCount.toLocaleString()} confirmed this way with no resolvable origin school)` : ""}. ${unconfirmed.toLocaleString()} other departed players aren't shown at all: most graduated, left for a program outside this tracker, or their school wasn't part of a fresh diff this snapshot.</span>`;
 
   document.getElementById('lastUpdatedFoot').textContent = data.lastUpdated || "unknown";
 }
@@ -957,10 +993,20 @@ function renderConfirmedLog(events){
   const sorted = [...events].sort((a,b)=>a.name.localeCompare(b.name));
   const shown = sorted.slice(0,500);
   logEl.innerHTML = `${events.length>500?`<div class="net-cap-note">Showing first 500 of ${events.length}.</div>`:''}${
-    shown.map(e=>`<div class="event-row">
+    shown.map(e=>{
+      const fromHtml = e.fromSchool
+        ? `<b class="filter-link" data-filter-school="${escapeHtml(e.fromSchool)}">${escapeHtml(e.fromSchool)}</b>`
+        : `<b style="color:var(--stale)">Unknown origin</b>`;
+      const badge = e.source==="bio-match"
+        ? ' <span class="origin-badge" title="Confirmed from the incoming player\'s own previous-school text, not a name cross-reference">via bio</span>'
+        : e.source==="exp-match"
+        ? ' <span class="origin-badge" title="Confirmed by the source site\'s own Cl./Exp. eligibility tag reading TR - their previous school isn\'t known">via exp tag</span>'
+        : '';
+      return `<div class="event-row">
       <div class="event-who">${escapeHtml(e.name)}<span class="pos">${escapeHtml(e.position)}</span></div>
-      <div class="event-path"><b class="filter-link" data-filter-school="${escapeHtml(e.fromSchool)}">${escapeHtml(e.fromSchool)}</b> &rarr; <b${e.toResolved ? ` class="filter-link" data-filter-school="${escapeHtml(e.toSchool)}"` : ''}>${escapeHtml(e.toResolved ? e.toSchool : (e.toSchool + ' (unmatched)'))}</b>${e.source==="bio-match" ? ' <span class="origin-badge" title="Confirmed from the incoming player\'s own previous-school text, not a name cross-reference">via bio</span>' : ''}</div>
-    </div>`).join("")
+      <div class="event-path">${fromHtml} &rarr; <b${e.toResolved ? ` class="filter-link" data-filter-school="${escapeHtml(e.toSchool)}"` : ''}>${escapeHtml(e.toResolved ? e.toSchool : (e.toSchool + ' (unmatched)'))}</b>${badge}</div>
+    </div>`;
+    }).join("")
   }`;
 }
 
@@ -1018,12 +1064,18 @@ function listRowHtml(e){
   const toHtml = e.toResolved
     ? `<span class="filter-link" data-filter-school="${escapeHtml(e.toSchool)}">${escapeHtml(e.toSchool)}</span>`
     : `${escapeHtml(e.toSchool)} <span style="color:var(--stale)">(unmatched)</span>`;
+  const fromSchoolHtml = e.fromSchool
+    ? `<div class="mono-cell filter-link" data-filter-school="${escapeHtml(e.fromSchool)}">${escapeHtml(e.fromSchool)}</div>`
+    : `<div class="mono-cell" style="color:var(--stale)">Unknown</div>`;
+  const fromConfHtml = e.fromConf
+    ? `<div class="mono-cell filter-link" data-filter-conf="${escapeHtml(e.fromConf)}">${escapeHtml(e.fromConf)}</div>`
+    : `<div class="mono-cell" style="color:var(--stale)">&mdash;</div>`;
   return `<div class="row">
     <div class="cell-name">${escapeHtml(e.name)}</div>
     <div class="mono-cell">${escapeHtml(e.position) || '&mdash;'}</div>
     <div class="mono-cell">${escapeHtml(e.cls) || '&mdash;'}</div>
-    <div class="mono-cell filter-link" data-filter-school="${escapeHtml(e.fromSchool)}">${escapeHtml(e.fromSchool)}</div>
-    <div class="mono-cell filter-link" data-filter-conf="${escapeHtml(e.fromConf)}">${escapeHtml(e.fromConf)}</div>
+    ${fromSchoolHtml}
+    ${fromConfHtml}
     <div class="mono-cell">${toHtml}</div>
   </div>`;
 }
@@ -1108,7 +1160,7 @@ function getNonPositionFilteredList(){
     if(listFilter.toConf==="__unmatched__"){ if(e.toResolved) return false; }
     else if(listFilter.toConf!=="all" && e.toConf!==listFilter.toConf) return false;
     if(search){
-      const hay = `${e.name} ${e.fromSchool} ${e.toSchool||""}`.toLowerCase();
+      const hay = `${e.name} ${e.fromSchool||""} ${e.toSchool||""}`.toLowerCase();
       if(!hay.includes(search)) return false;
     }
     return true;
