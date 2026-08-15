@@ -1566,16 +1566,26 @@ function renderScoped(){
 
   const scopedSchools = getScopedSchools();
   const scopedEvents = getScopedEvents();
+  // fromConf is only ever populated for a genuine D3-to-D3 match (name-match's origin school
+  // is always one we scraped; bio-match only sets it when classifyOrigin resolved scope==="d3")
+  // - an exp-match/bio-match event with a resolved non-D3 origin (see buildEvents) deliberately
+  // leaves it null. Net Margin and the volume charts are framed as within-D3 flow, where every
+  // transfer should be one school's "out" balanced by another's "in"; a non-D3 arrival has no
+  // D3 school to debit, so counting its "in" side alone would inflate a school's margin and the
+  // volume totals without a matching subtraction anywhere. The confirmed log and conf-flow
+  // chart intentionally keep showing these (computeConfPairs already filters on fromConf itself)
+  // since a resolved non-D3 origin is still useful to see per player, just not as within-D3 flow.
+  const withinD3Events = scopedEvents.filter(e => e.fromConf);
 
   renderConfFlowBars(scopedEvents);
   renderConfirmedLog(scopedEvents);
 
-  const schoolAgg = aggregateBySchool(scopedEvents, scopedSchools);
+  const schoolAgg = aggregateBySchool(withinD3Events, scopedSchools);
   const confAgg = aggregateByConference(schoolAgg, scopedSchools);
   renderNetMargins(schoolAgg, confAgg);
 
-  renderPositionVolumeChart(document.getElementById('posVolumeChart'), scopedEvents);
-  renderClassVolumeChart(document.getElementById('classVolumeChart'), scopedEvents);
+  renderPositionVolumeChart(document.getElementById('posVolumeChart'), withinD3Events);
+  renderClassVolumeChart(document.getElementById('classVolumeChart'), withinD3Events);
   renderConfActivityTable(confAgg);
 
   renderNonD3DivisionBars(getScopedNonD3Rows());
