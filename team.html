@@ -606,6 +606,21 @@ function transferCardLinks(t, isOut, schoolName){
   return links;
 }
 
+/* Roster rows reuse whatever computeTransfers already resolved for this player (name-match,
+   bio-match, or exp-match - see rosterXferByName) instead of re-deriving a narrower answer from
+   classifyOrigin alone, so the card is never less informed than the Transfer Portal Network
+   widget above it. A player with no confirmed match (Returning, or a Gone/New player nothing
+   resolved) just gets their own bio link. */
+function openPlayerCardForRoster(p, cat, schoolName){
+  const entry = rosterXferByName.get(p.name.toLowerCase());
+  if(entry){
+    const meta = entry.dir === "in" ? `arrived via ${entry.source.replace("-", " ")}` : "departed via name-match";
+    openPlayerCard(p.name, p.position, meta, transferCardLinks(entry, entry.dir === "out", schoolName));
+    return;
+  }
+  openPlayerCard(p.name, p.position, cat, [{label: "Current bio", school: schoolName, url: p.profileUrl}]);
+}
+
 /* data.lastUpdated is the whole-dataset generation timestamp - "how old is everything
    you're looking at," surfaced at the top of the page since that's the first thing worth
    knowing about a scraped dataset. See the same function in index.html for the full
@@ -947,6 +962,11 @@ function flattenSchools(data){
 
 const APP = { data:null, schools:[], byName:new Map(), nonD3Index:new Map(), d3Index:new Map() };
 
+// Set once per school render (see computeTransfers call site) so roster rows can show the same
+// resolved transfer match - name-match, bio-match, or exp-match - as the Transfer Portal Network
+// widget, rather than re-deriving a narrower answer from classifyOrigin alone.
+let rosterXferByName = new Map();
+
 /* ============ per-school metric computations ============ */
 function currentRoster(school){
   return school.players.filter(p=>p.category !== "Gone");
@@ -1225,6 +1245,9 @@ function renderTeam(school, allSchools){
 
   // transfers
   const xfer = computeTransfers(allSchools, school);
+  rosterXferByName = new Map();
+  xfer.in.forEach(t => rosterXferByName.set(t.name.toLowerCase(), {...t, dir:"in"}));
+  xfer.out.forEach(t => rosterXferByName.set(t.name.toLowerCase(), {...t, dir:"out"}));
   const net = xfer.in.length - xfer.out.length;
   document.getElementById("transferNet").innerHTML = `
     <div class="big ${net>0?"up":net<0?"down":"flat"}">${net>0?"+":""}${net}</div>
@@ -1274,7 +1297,7 @@ function renderTeam(school, allSchools){
   renderRosterSection(school);
 }
 
-function rosterRowHtml(p, cat){
+function rosterRowHtml(p, cat, i){
   const dep = departureInfo(p);
   let statusHtml;
   if(cat==="Gone"){
@@ -1291,7 +1314,7 @@ function rosterRowHtml(p, cat){
     statusHtml = `<span class="mono-cell">${escapeHtml(displayText)}${originBadge}</span>`;
   }
   return `<div class="row">
-    <div class="cell-name">${escapeHtml(p.name)}</div>
+    <div class="cell-name clickable-name" data-card-index="${i}">${escapeHtml(p.name)}</div>
     <div class="mono-cell">${escapeHtml(p.position)}</div>
     <div class="mono-cell">${escapeHtml(p.cls)}</div>
     <div class="mono-cell">${escapeHtml(p.height)}</div>
@@ -1456,6 +1479,7 @@ function renderRosterSection(school){
     rosterNoteEl.textContent = `${list.length} of ${school.players.length} players`;
 
     rosterTablesEl.innerHTML = "";
+    const cardData = [];
     const cats = filter.category==="all" ? ["Gone","Returning","New"]
       : filter.category==="current" ? ["Returning","New"]
       : [filter.category];
@@ -1479,14 +1503,33 @@ function renderRosterSection(school){
       let rowsHtml = `<div class="roster-group-head">${cat} (${catList.length})</div>
         <div class="roster-grid">
           <div class="row-head">${headCells}</div>`;
-      catList.forEach(p=>{ rowsHtml += rosterRowHtml(p, cat); });
+      catList.forEach(p=>{
+        const idx = cardData.length;
+        cardData.push(() => openPlayerCardForRoster(p, cat, school.name));
+        rowsHtml += rosterRowHtml(p, cat, idx);
+      });
       rowsHtml += `</div>`;
       group.innerHTML = rowsHtml;
       rosterTablesEl.appendChild(group);
     });
+    rosterTablesEl._cardData = cardData;
     if(!rendered){
       rosterTablesEl.innerHTML = `<div class="roster-empty">No players match the current filters.</div>`;
     }
+  }
+
+  // rosterTablesEl persists across draw() calls (only its innerHTML is replaced) and across
+  // school switches (renderRosterSection re-runs per school) - bind the delegated listener
+  // once rather than once per draw(), or repeated school switches would stack duplicate
+  // listeners and open the card multiple times per click.
+  if(!rosterTablesEl._cardClickBound){
+    rosterTablesEl.addEventListener('click', (e)=>{
+      const cardEl = e.target.closest('[data-card-index]');
+      if(!cardEl) return;
+      const item = (rosterTablesEl._cardData || [])[+cardEl.dataset.cardIndex];
+      if(item) item();
+    });
+    rosterTablesEl._cardClickBound = true;
   }
 
   draw();

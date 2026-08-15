@@ -42,6 +42,39 @@
     text-transform:uppercase;cursor:default;align-self:center;
   }
 
+  .clickable-name{cursor:pointer;}
+  .clickable-name:hover{text-decoration:underline;text-decoration-color:var(--gold);}
+
+  .player-card-overlay{
+    display:none;position:fixed;inset:0;background:rgba(10,20,15,0.72);
+    z-index:200;align-items:center;justify-content:center;padding:20px;
+  }
+  .player-card-overlay.show{display:flex;}
+  .player-card{
+    background:var(--field-dark);border:1px solid var(--line);border-radius:4px;
+    max-width:420px;width:100%;padding:26px;position:relative;
+    box-shadow:0 20px 60px rgba(0,0,0,0.5);
+  }
+  .player-card-close{
+    position:absolute;top:12px;right:12px;background:none;border:none;
+    color:var(--muted);font-size:22px;cursor:pointer;line-height:1;padding:6px;
+  }
+  .player-card-close:hover{color:var(--chalk);}
+  .player-card h3{font-family:var(--display);font-size:26px;text-transform:uppercase;margin:0 0 6px;letter-spacing:0.01em;}
+  .player-card .pc-meta{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:20px;}
+  .player-card .pc-meta b{color:var(--gold-bright);}
+  .player-card .pc-links{display:flex;flex-direction:column;gap:10px;}
+  .player-card .pc-link{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:rgba(244,241,232,0.05);border:1px solid var(--line);border-radius:3px;
+    padding:12px 14px;text-decoration:none;color:var(--chalk);transition:border-color .12s,background .12s;
+  }
+  .player-card .pc-link:hover{border-color:var(--gold);background:rgba(201,162,39,0.08);}
+  .player-card .pc-link-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);}
+  .player-card .pc-link-school{font-family:var(--mono);font-size:13px;margin-top:3px;}
+  .player-card .pc-link-arrow{color:var(--gold-bright);font-size:17px;flex-shrink:0;}
+  .player-card .pc-empty{font-family:var(--mono);font-size:12px;color:var(--stale);padding:8px 0 0;}
+
   .hero{border-bottom:1px solid var(--line);padding-bottom:26px;margin-bottom:34px;}
   .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:var(--gold-bright);margin-bottom:10px;}
   h1{font-family:var(--display);font-size:clamp(32px,5.5vw,58px);letter-spacing:0.01em;line-height:0.95;margin:0 0 12px;text-transform:uppercase;}
@@ -410,6 +443,15 @@
 
 <div id="tooltip"></div>
 
+<div class="player-card-overlay" id="playerCardOverlay">
+  <div class="player-card">
+    <button class="player-card-close" id="playerCardClose" aria-label="Close" title="Close">&times;</button>
+    <h3 id="pcName"></h3>
+    <div class="pc-meta" id="pcMeta"></div>
+    <div class="pc-links" id="pcLinks"></div>
+  </div>
+</div>
+
 <script>
 /* ============ shared helpers (mirrors index.html / team.html) ============ */
 const CLASS_ORDER = ["Fr","R-Fr","So","R-So","Jr","R-Jr","Sr","R-Sr","Gr"];
@@ -461,6 +503,41 @@ function escapeHtml(str){
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/* Player-card popup: shows whichever bio links are actually resolvable for a transfer event,
+   so a claimed match can be checked against the source sites directly instead of just trusted -
+   see the transfer-match audit for how much manual roster-hunting this replaces. Links are
+   omitted, not shown broken, when a side has no profileUrl (a non-D3 origin we don't scrape,
+   or an older cached snapshot from before that field existed). */
+function openPlayerCard(name, position, meta, links){
+  document.getElementById('pcName').textContent = name;
+  document.getElementById('pcMeta').innerHTML = `${escapeHtml(position || "—")}${meta ? ` &middot; ${escapeHtml(meta)}` : ""}`;
+  const linksEl = document.getElementById('pcLinks');
+  const usable = links.filter(l => l.url);
+  linksEl.innerHTML = usable.length
+    ? usable.map(l => `<a class="pc-link" href="${escapeHtml(l.url)}" target="_blank" rel="noopener">
+        <div><div class="pc-link-label">${escapeHtml(l.label)}</div><div class="pc-link-school">${escapeHtml(l.school)}</div></div>
+        <div class="pc-link-arrow">&rarr;</div>
+      </a>`).join("")
+    : `<div class="pc-empty">No bio link available for this player in the current snapshot.</div>`;
+  document.getElementById('playerCardOverlay').classList.add('show');
+}
+function closePlayerCard(){
+  document.getElementById('playerCardOverlay').classList.remove('show');
+}
+document.getElementById('playerCardClose').addEventListener('click', closePlayerCard);
+document.getElementById('playerCardOverlay').addEventListener('click', (e)=>{
+  if(e.target.id === 'playerCardOverlay') closePlayerCard();
+});
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'Escape') closePlayerCard();
+});
+
+function eventCardLinks(e){
+  const links = [{label: "Current bio", school: e.toSchool, url: e.player ? e.player.profileUrl : ""}];
+  if(e.fromSchool) links.push({label: "Previous school bio", school: e.fromSchool, url: e.matchedPlayer ? e.matchedPlayer.profileUrl : ""});
+  return links;
 }
 
 /* data.lastUpdated is the whole-dataset generation timestamp - "how old is everything
@@ -798,7 +875,12 @@ function buildEvents(schools, byName, nonD3Index, d3Index){
       events.push({
         name: p.name, position: p.position || "", positionKey: positionFilterKey((p.position||"").toUpperCase().trim()),
         cls: p.cls, fromSchool: s.name, fromConf: s.confName,
-        toSchool, toConf, toResolved, source: "name-match"
+        toSchool, toConf, toResolved, source: "name-match",
+        // player/matchedPlayer follow the same convention as the bio-match branch below:
+        // player is the record at toSchool ("current bio"), matchedPlayer at fromSchool
+        // ("previous school bio") - p here is the departing record at fromSchool, so it's
+        // matchedPlayer, not player.
+        player: toResolved ? findPlayerAtSchool(schools, toSchool, p.name) : null, matchedPlayer: p
       });
       if(toResolved) confirmedKeys.add(p.name.toLowerCase() + "||" + toSchool.toLowerCase());
     });
@@ -821,7 +903,8 @@ function buildEvents(schools, byName, nonD3Index, d3Index){
       events.push({
         name: p.name, position: p.position || "", positionKey: positionFilterKey((p.position||"").toUpperCase().trim()),
         cls: p.cls, fromSchool: origin.matchedName, fromConf: origin.matchedConf,
-        toSchool: s.name, toConf: s.confName, toResolved: true, source: "bio-match"
+        toSchool: s.name, toConf: s.confName, toResolved: true, source: "bio-match",
+        player: p, matchedPlayer: originPlayer
       });
     });
   });
@@ -839,7 +922,8 @@ function buildEvents(schools, byName, nonD3Index, d3Index){
         name: p.name, position: p.position || "", positionKey: positionFilterKey((p.position||"").toUpperCase().trim()),
         cls: p.cls, fromSchool: origin ? origin.matchedName : null, fromConf: null,
         fromDivision: origin && origin.scope === "non-d3" ? origin.division : null,
-        toSchool: s.name, toConf: s.confName, toResolved: true, source: origin ? "bio-match" : "exp-match"
+        toSchool: s.name, toConf: s.confName, toResolved: true, source: origin ? "bio-match" : "exp-match",
+        player: p, matchedPlayer: null
       });
     });
   });
@@ -1116,9 +1200,13 @@ function initFilterBarControls(){
   });
 }
 
-/* One delegated listener per table body handles every school/conference click in it, since
-   rows are replaced wholesale on every re-render - re-binding per row on every render would
-   work too, but this stays correct with zero re-binding. */
+/* One delegated listener per table body handles every school/conference/player-card click in
+   it, since rows are replaced wholesale on every re-render - re-binding per row on every render
+   would work too, but this stays correct with zero re-binding. Player-card clicks read from
+   containerEl._cardData rather than data-* attributes, since the card needs the actual player
+   objects (for their profileUrl) which can't round-trip through a string attribute - each
+   render function that wants cards is responsible for setting that array to match whatever
+   order it rendered data-card-index against. */
 function bindFilterClicks(containerEl){
   if(!containerEl) return;
   containerEl.addEventListener('click', (e)=>{
@@ -1126,6 +1214,12 @@ function bindFilterClicks(containerEl){
     if(schoolEl){ setSchoolFilter(schoolEl.dataset.filterSchool); return; }
     const confEl = e.target.closest('[data-filter-conf]');
     if(confEl){ setConferenceFilter(confEl.dataset.filterConf); return; }
+    const cardEl = e.target.closest('[data-card-index]');
+    if(cardEl){
+      const item = (containerEl._cardData || [])[+cardEl.dataset.cardIndex];
+      if(item) item();
+      return;
+    }
   });
 }
 
@@ -1209,8 +1303,9 @@ function renderConfirmedLog(events){
   // exclusively whenever there happen to be 500+ of them.
   const sorted = [...events].sort((a,b)=>a.name.localeCompare(b.name));
   const shown = sorted.slice(0,500);
+  logEl._cardData = shown.map(e => () => openPlayerCard(e.name, e.position, `${e.source.replace("-", " ")} confirmed`, eventCardLinks(e)));
   logEl.innerHTML = `${events.length>500?`<div class="net-cap-note">Showing first 500 of ${events.length}.</div>`:''}${
-    shown.map(e=>{
+    shown.map((e,i)=>{
       const fromHtml = e.fromSchool
         ? `<b class="filter-link" data-filter-school="${escapeHtml(e.fromSchool)}">${escapeHtml(e.fromSchool)}</b>${e.fromDivision ? ` <span class="origin-badge" title="Not a tracked D3 program - best-effort match, not confirmed">${escapeHtml(DIVISION_LABEL[e.fromDivision])}</span>` : ''}`
         : `<b style="color:var(--stale)">Unknown origin</b>`;
@@ -1220,7 +1315,7 @@ function renderConfirmedLog(events){
         ? ' <span class="origin-badge" title="Confirmed by the source site\'s own Cl./Exp. eligibility tag reading TR - their previous school isn\'t known">via exp tag</span>'
         : '';
       return `<div class="event-row">
-      <div class="event-who">${escapeHtml(e.name)}<span class="pos">${escapeHtml(e.position)}</span></div>
+      <div class="event-who clickable-name" data-card-index="${i}">${escapeHtml(e.name)}<span class="pos">${escapeHtml(e.position)}</span></div>
       <div class="event-path">${fromHtml} &rarr; <b${e.toResolved ? ` class="filter-link" data-filter-school="${escapeHtml(e.toSchool)}"` : ''}>${escapeHtml(e.toResolved ? e.toSchool : (e.toSchool + ' (unmatched)'))}</b>${badge}</div>
     </div>`;
     }).join("")
@@ -1277,7 +1372,7 @@ function listSortValue(e, col){
   return (e[col] || "").toString().toLowerCase();
 }
 
-function listRowHtml(e){
+function listRowHtml(e, i){
   const toHtml = e.toResolved
     ? `<span class="filter-link" data-filter-school="${escapeHtml(e.toSchool)}">${escapeHtml(e.toSchool)}</span>`
     : `${escapeHtml(e.toSchool)} <span style="color:var(--stale)">(unmatched)</span>`;
@@ -1291,7 +1386,7 @@ function listRowHtml(e){
     ? `<div class="mono-cell filter-link" data-filter-conf="${escapeHtml(e.fromConf)}">${escapeHtml(e.fromConf)}</div>`
     : `<div class="mono-cell" style="color:var(--stale)">&mdash;</div>`;
   return `<div class="row">
-    <div class="cell-name">${escapeHtml(e.name)}</div>
+    <div class="cell-name clickable-name" data-card-index="${i}">${escapeHtml(e.name)}</div>
     <div class="mono-cell">${escapeHtml(e.position) || '&mdash;'}</div>
     <div class="mono-cell">${escapeHtml(e.cls) || '&mdash;'}</div>
     ${fromSchoolHtml}
@@ -1392,14 +1487,16 @@ function isOutgoingEvent(e){
 function renderListBody(bodyId, rows, emptyMsg){
   const body = document.getElementById(bodyId);
   if(!rows.length){
+    body._cardData = [];
     body.innerHTML = `<div class="list-empty">${emptyMsg}</div>`;
-  } else if(rows.length > 500){
-    body.innerHTML = `<div class="row" style="grid-template-columns:1fr;color:var(--muted);font-family:var(--mono);font-size:12px;">
-      Showing first 500 of ${rows.length} &mdash; narrow with search or filters to see more.</div>` +
-      rows.slice(0,500).map(listRowHtml).join("");
-  } else {
-    body.innerHTML = rows.map(listRowHtml).join("");
+    return;
   }
+  const shown = rows.length > 500 ? rows.slice(0,500) : rows;
+  body._cardData = shown.map(e => () => openPlayerCard(e.name, e.position, `${e.source.replace("-", " ")} confirmed`, eventCardLinks(e)));
+  body.innerHTML = (rows.length > 500
+    ? `<div class="row" style="grid-template-columns:1fr;color:var(--muted);font-family:var(--mono);font-size:12px;">
+      Showing first 500 of ${rows.length} &mdash; narrow with search or filters to see more.</div>`
+    : "") + shown.map(listRowHtml).join("");
 }
 
 function getNonPositionFilteredList(){
@@ -1503,9 +1600,9 @@ function nonD3SortValue(r, col){
   return (r[col] || "").toString().toLowerCase();
 }
 
-function nonD3RowHtml(r){
+function nonD3RowHtml(r, i){
   return `<div class="row">
-    <div class="cell-name">${escapeHtml(r.name)}</div>
+    <div class="cell-name clickable-name" data-card-index="${i}">${escapeHtml(r.name)}</div>
     <div class="mono-cell">${escapeHtml(r.position) || '&mdash;'}</div>
     <div class="mono-cell">${escapeHtml(r.cls) || '&mdash;'}</div>
     <div class="mono-cell filter-link" data-filter-school="${escapeHtml(r.school)}">${escapeHtml(r.school)}</div>
@@ -1553,6 +1650,10 @@ function drawNonD3List(){
   document.getElementById('nonD3Count').textContent =
     `${list.length} of ${getScopedNonD3Rows().length} New players whose previous-school text matches a tracked non-D3 program`;
   const body = document.getElementById('nonD3ListBody');
+  // The non-D3 origin school itself is never scraped, so there's only ever a "current bio"
+  // link here - no matched-player lookup is possible on the other side.
+  body._cardData = list.map(r => () => openPlayerCard(r.name, r.position, `bio-matched to ${r.originName} (not tracked)`,
+    [{label: "Current bio", school: r.school, url: (findPlayerAtSchool(APP.schools, r.school, r.name) || {}).profileUrl}]));
   body.innerHTML = list.length ? list.map(nonD3RowHtml).join("") : `<div class="list-empty">No matches for the current filters.</div>`;
 }
 
