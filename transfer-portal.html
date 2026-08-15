@@ -56,6 +56,8 @@
   }
   .filter-bar.show{display:flex;flex-wrap:wrap;}
   .filter-label{color:var(--chalk);}
+  .tab-bar{display:flex;gap:8px;margin-bottom:32px;}
+  .tab-bar .chip{font-size:12px;padding:9px 18px;}
   .filter-label b{color:var(--gold-bright);}
   .crumb{color:var(--muted);cursor:pointer;text-decoration:none;}
   .crumb:hover{color:var(--gold-bright);}
@@ -213,6 +215,13 @@
     <button class="filter-clear" id="filterBarClearBtn" style="margin-left:auto;">Clear &#10005;</button>
   </div>
 
+  <div class="tab-bar" id="tabBar">
+    <button type="button" class="chip active" data-tab="within">Within D3</button>
+    <button type="button" class="chip" data-tab="outside">Outside D3</button>
+  </div>
+
+  <div id="withinD3Tab">
+
   <section>
     <div class="section-head">
       <h2>Conference-to-Conference Flow</h2>
@@ -220,33 +229,6 @@
     </div>
     <div class="panel">
       <div id="confFlowBars"></div>
-    </div>
-  </section>
-
-  <section>
-    <div class="section-head">
-      <h2>Incoming From Outside D3</h2>
-      <div class="section-note">Best-effort text match against a master list of D1/D2/NAIA/NJCAA/CCCAA/NWAC programs &mdash; not confirmed, and only catches sites that expose a transfer's previous school</div>
-    </div>
-    <div class="panel">
-      <div class="log-title" id="nonD3Count"></div>
-      <div id="nonD3DivisionBars"></div>
-    </div>
-    <div class="controls" id="nonD3DivisionChips" style="margin-top:16px;">
-      <button type="button" class="chip active" data-division="all">All Levels</button>
-    </div>
-    <div class="controls">
-      <input class="search" id="nonD3Search" placeholder="Search player, school, previous school…" autocomplete="off">
-      <select class="school-select" id="nonD3ConfFilter"></select>
-      <button type="button" class="filter-clear" id="nonD3FilterClear" style="margin-left:auto;">Clear Filters &#10005;</button>
-    </div>
-    <div class="roster-grid" id="nonD3ListGrid">
-      <div class="row-head">
-        <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
-        <span data-sort="school">School</span><span data-sort="confName">Conf.</span>
-        <span data-sort="division">Previous School</span>
-      </div>
-      <div id="nonD3ListBody"></div>
     </div>
   </section>
 
@@ -287,7 +269,7 @@
     <section>
       <div class="section-head">
         <h2>Transfer Volume by Class Year</h2>
-        <div class="section-note">Confirmed transfers only, by class at time of departure</div>
+        <div class="section-note">Confirmed transfers only</div>
       </div>
       <div class="panel">
         <div id="classVolumeChart"></div>
@@ -344,6 +326,39 @@
       <div id="confirmedLog"></div>
     </div>
   </section>
+
+  </div>
+
+  <div id="outsideD3Tab" style="display:none;">
+
+  <section>
+    <div class="section-head">
+      <h2>Incoming From Outside D3</h2>
+      <div class="section-note">Best-effort text match against a master list of D1/D2/NAIA/NJCAA/CCCAA/NWAC programs &mdash; not confirmed, and only catches sites that expose a transfer's previous school</div>
+    </div>
+    <div class="panel">
+      <div class="log-title" id="nonD3Count"></div>
+      <div id="nonD3DivisionBars"></div>
+    </div>
+    <div class="controls" id="nonD3DivisionChips" style="margin-top:16px;">
+      <button type="button" class="chip active" data-division="all">All Levels</button>
+    </div>
+    <div class="controls">
+      <input class="search" id="nonD3Search" placeholder="Search player, school, previous school…" autocomplete="off">
+      <select class="school-select" id="nonD3ConfFilter"></select>
+      <button type="button" class="filter-clear" id="nonD3FilterClear" style="margin-left:auto;">Clear Filters &#10005;</button>
+    </div>
+    <div class="roster-grid" id="nonD3ListGrid">
+      <div class="row-head">
+        <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
+        <span data-sort="school">School</span><span data-sort="confName">Conf.</span>
+        <span data-sort="division">Previous School</span>
+      </div>
+      <div id="nonD3ListBody"></div>
+    </div>
+  </section>
+
+  </div>
 
   <footer>Source: roster snapshot dataset, last updated <span id="lastUpdatedFoot"></span>. Only confirmed transfers are shown (name cross-reference or incoming bio text) &mdash; a school with no confirmed transfers here hasn't necessarily kept everyone, it just hasn't had a departure resolve to a tracked destination yet.</footer>
 </div>
@@ -847,6 +862,26 @@ function bindFilterClicks(containerEl){
   });
 }
 
+/* ============ Within D3 / Outside D3 tabs ============ */
+/* The school/conference filter above stays active across both tabs - it's the same underlying
+   scope, just two different views onto it. */
+function setActiveTab(tab){
+  document.getElementById('withinD3Tab').style.display = tab==="within" ? "" : "none";
+  document.getElementById('outsideD3Tab').style.display = tab==="outside" ? "" : "none";
+  document.querySelectorAll('#tabBar .chip').forEach(c=>c.classList.toggle('active', c.dataset.tab===tab));
+  const url = new URL(window.location);
+  if(tab==="within") url.searchParams.delete("tab"); else url.searchParams.set("tab", tab);
+  window.history.replaceState({}, "", url);
+}
+
+function initTabs(){
+  document.querySelectorAll('#tabBar .chip').forEach(chip=>{
+    chip.addEventListener('click', ()=> setActiveTab(chip.dataset.tab));
+  });
+  const initial = new URLSearchParams(window.location.search).get("tab");
+  setActiveTab(initial==="outside" ? "outside" : "within");
+}
+
 function renderHero(data, schools, events, totalGone){
   const resolved = events.filter(e=>e.toResolved);
   const cross = resolved.filter(e=>e.fromConf!==e.toConf).length;
@@ -1286,7 +1321,13 @@ Promise.all([loadData(), loadNonD3Schools()]).then(([data, nonD3Schools])=>{
     renderScoped();
   });
 
+  // Renders first, while both tabs still sit in their default (within-visible) markup state -
+  // the D3 charts compute pixel width from clientWidth, which is 0 on a display:none ancestor,
+  // so they need real layout to draw into. initTabs() runs after and may immediately hide this
+  // tab again (e.g. loading with ?tab=outside), which is fine - the charts' dimensions are
+  // already baked into their SVG attributes by then, so hiding the container doesn't undo them.
   renderScoped();
+  initTabs();
 }).catch(err=>{
   document.getElementById('statRow').innerHTML = "";
   document.getElementById('dataNote').innerHTML = `Couldn't load roster data: ${escapeHtml(err.message)}`;
