@@ -791,16 +791,30 @@ function computeConferenceAverages(confSchools, thisSchoolName){
   return { expIndex: expN ? expSum/expN : null, posAvgPerSchool, size, schoolCount: n };
 }
 
+/* Program.ClassifyDepartures name-matches a departing player against every school's New list by
+   name alone. Two different real people can share a common name ("Alex Smith") - older snapshots
+   (scraped before that logic was tightened to check for this) can have every Gone player sharing
+   such a name stamped with the same single unrelated arrival as their "destination". Since that
+   can't be told apart from a real match using only this data, any name with more than one Gone
+   occurrence this snapshot is excluded here rather than risk showing a wrong pairing. */
 function computeTransfers(allSchools, school){
+  const goneCountByName = new Map();
+  allSchools.forEach(s=>{
+    s.players.forEach(p=>{
+      if(p.category==="Gone") goneCountByName.set(p.name, (goneCountByName.get(p.name)||0)+1);
+    });
+  });
+  const isAmbiguous = name => (goneCountByName.get(name)||0) > 1;
+
   const out = school.players
-    .filter(p=>p.category==="Gone" && (p.departureReason||"").startsWith("Transferred to "))
+    .filter(p=>p.category==="Gone" && (p.departureReason||"").startsWith("Transferred to ") && !isAmbiguous(p.name))
     .map(p=>({name:p.name, dest:p.departureReason.slice("Transferred to ".length), position:p.position}));
 
   const inList = [];
   allSchools.forEach(s=>{
     if(s.name === school.name) return;
     s.players.forEach(p=>{
-      if(p.category==="Gone" && p.departureReason === `Transferred to ${school.name}`){
+      if(p.category==="Gone" && p.departureReason === `Transferred to ${school.name}` && !isAmbiguous(p.name)){
         inList.push({name:p.name, from:s.name, position:p.position});
       }
     });

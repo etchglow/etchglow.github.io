@@ -441,6 +441,8 @@ const DIVISION_LABEL = {
   "NAIA":"NAIA", "NJCAA":"NJCAA", "CCCAA":"CCCAA", "NWAC":"NWAC"
 };
 const DIVISION_ORDER = ["D1-FBS","D1-FCS","D2","NAIA","NJCAA","CCCAA","NWAC"];
+const D1D2_DIVISIONS = new Set(["D1-FBS","D1-FCS","D2"]);
+const OTHER_NON_D3_DIVISIONS = new Set(["NAIA","NJCAA","CCCAA","NWAC"]);
 
 function normalizeSchoolText(s){
   return String(s||"")
@@ -574,12 +576,27 @@ function buildEvents(schools, byName, nonD3Index, d3Index){
   const confirmedKeys = new Set(); // `${player}||${toSchool}`, lowercased
   let totalGone = 0;
 
+  // Program.ClassifyDepartures name-matches a departing player against every school's New list
+  // by name alone. Two different real people can share a common name ("Alex Smith") - older
+  // snapshots (scraped before that logic was tightened to check for this) can have every Gone
+  // player sharing such a name stamped with the same single unrelated arrival as their
+  // "destination". Since that can't be told apart from a real match using only this data, any
+  // name with more than one Gone occurrence this snapshot is treated as untrustworthy here and
+  // excluded from name-match confirmation entirely, rather than risk a wrong pairing.
+  const goneCountByName = new Map();
+  schools.forEach(s=>{
+    s.players.forEach(p=>{
+      if(p.category==="Gone") goneCountByName.set(p.name, (goneCountByName.get(p.name)||0)+1);
+    });
+  });
+
   schools.forEach(s=>{
     s.players.forEach(p=>{
       if(p.category !== "Gone") return;
       totalGone++;
       const r = p.departureReason || "";
       if(!r.startsWith("Transferred to ")) return;
+      if((goneCountByName.get(p.name)||0) > 1) return;
       const destName = r.slice("Transferred to ".length);
       const dest = byName.get(destName.toLowerCase());
       const toSchool = dest ? dest.name : destName;
@@ -891,11 +908,19 @@ function renderHero(data, schools, events, totalGone){
   const schoolsInvolved = new Set();
   events.forEach(e=>{ schoolsInvolved.add(e.fromSchool); if(e.toResolved) schoolsInvolved.add(e.toSchool); });
 
+  // Best-effort, not confirmed - same population as the Outside D3 tab (nonD3Rows), so this
+  // stays unaffected by the page-wide school/conference filter just like the rest of the hero.
+  const fromD1D2 = nonD3Rows.filter(r=>D1D2_DIVISIONS.has(r.division)).length;
+  const fromOtherLevel = nonD3Rows.filter(r=>OTHER_NON_D3_DIVISIONS.has(r.division)).length;
+  const bestEffortTitle = "Best-effort text match against a tracked non-D3 program - not confirmed. See the Outside D3 tab.";
+
   document.getElementById('statRow').innerHTML = `
     <div class="stat"><div class="n">${events.length}</div><div class="l">Confirmed Transfers</div></div>
     <div class="stat"><div class="n">${schoolsInvolved.size}</div><div class="l">Schools Involved</div></div>
     <div class="stat"><div class="n">${fmtPct(crossPct)}</div><div class="l">Left Their Conference</div></div>
     <div class="stat"><div class="n">${fmtPct(withinPct)}</div><div class="l">Stayed In Conference</div></div>
+    <div class="stat" title="${escapeHtml(bestEffortTitle)}"><div class="n muted">${fromD1D2}</div><div class="l">From D1 / D2</div></div>
+    <div class="stat" title="${escapeHtml(bestEffortTitle)}"><div class="n muted">${fromOtherLevel}</div><div class="l">From NAIA / Juco</div></div>
     <div class="stat"><div class="n muted">${schools.length}</div><div class="l">Schools Tracked</div></div>
   `;
 
