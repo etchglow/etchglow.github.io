@@ -44,6 +44,39 @@
     text-transform:uppercase;cursor:default;align-self:center;
   }
 
+  .transfer-item.clickable{cursor:pointer;}
+  .transfer-item.clickable:hover .who{text-decoration:underline;text-decoration-color:var(--gold);}
+
+  .player-card-overlay{
+    display:none;position:fixed;inset:0;background:rgba(10,20,15,0.72);
+    z-index:200;align-items:center;justify-content:center;padding:20px;
+  }
+  .player-card-overlay.show{display:flex;}
+  .player-card{
+    background:var(--field-dark);border:1px solid var(--line);border-radius:4px;
+    max-width:420px;width:100%;padding:26px;position:relative;
+    box-shadow:0 20px 60px rgba(0,0,0,0.5);
+  }
+  .player-card-close{
+    position:absolute;top:12px;right:12px;background:none;border:none;
+    color:var(--muted);font-size:22px;cursor:pointer;line-height:1;padding:6px;
+  }
+  .player-card-close:hover{color:var(--chalk);}
+  .player-card h3{font-family:var(--display);font-size:26px;text-transform:uppercase;margin:0 0 6px;letter-spacing:0.01em;}
+  .player-card .pc-meta{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:20px;}
+  .player-card .pc-meta b{color:var(--gold-bright);}
+  .player-card .pc-links{display:flex;flex-direction:column;gap:10px;}
+  .player-card .pc-link{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:rgba(244,241,232,0.05);border:1px solid var(--line);border-radius:3px;
+    padding:12px 14px;text-decoration:none;color:var(--chalk);transition:border-color .12s,background .12s;
+  }
+  .player-card .pc-link:hover{border-color:var(--gold);background:rgba(201,162,39,0.08);}
+  .player-card .pc-link-label{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);}
+  .player-card .pc-link-school{font-family:var(--mono);font-size:13px;margin-top:3px;}
+  .player-card .pc-link-arrow{color:var(--gold-bright);font-size:17px;flex-shrink:0;}
+  .player-card .pc-empty{font-family:var(--mono);font-size:12px;color:var(--stale);padding:8px 0 0;}
+
   .picker-bar{
     display:flex;align-items:center;gap:12px;flex-wrap:wrap;
     background:rgba(244,241,232,0.03);border:1px solid var(--line);border-radius:2px;
@@ -409,6 +442,15 @@
   <footer>Source: roster snapshot dataset. Schools without a fresh crawl show no turnover for this snapshot &mdash; that's a data gap, not zero movement.</footer>
 </div>
 
+<div class="player-card-overlay" id="playerCardOverlay">
+  <div class="player-card">
+    <button class="player-card-close" id="playerCardClose" aria-label="Close" title="Close">&times;</button>
+    <h3 id="pcName"></h3>
+    <div class="pc-meta" id="pcMeta"></div>
+    <div class="pc-links" id="pcLinks"></div>
+  </div>
+</div>
+
 <script>
 /* ============ shared parsing helpers (mirrors index.html) ============ */
 const CLASS_ORDER = ["Fr","R-Fr","So","R-So","Jr","R-Jr","Sr","R-Sr","Gr"];
@@ -522,6 +564,46 @@ function escapeHtml(str){
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/* Player-card popup: shows whichever bio links are actually resolvable for a transfer-list
+   entry, so a claimed match can be checked against the source sites directly instead of just
+   trusted - the whole point of putting this here is to make validating a transfer a click
+   away rather than a manual roster hunt (see the transfer-match audit for how much of that
+   manual checking this is meant to replace). Links are omitted, not shown broken, when a side
+   has no profileUrl (older cached snapshot from before that field existed, or a template that
+   doesn't expose bio pages at all). */
+function openPlayerCard(name, position, meta, links){
+  document.getElementById('pcName').textContent = name;
+  document.getElementById('pcMeta').innerHTML = `${escapeHtml(position || "—")}${meta ? ` &middot; ${escapeHtml(meta)}` : ""}`;
+  const linksEl = document.getElementById('pcLinks');
+  const usable = links.filter(l => l.url);
+  linksEl.innerHTML = usable.length
+    ? usable.map(l => `<a class="pc-link" href="${escapeHtml(l.url)}" target="_blank" rel="noopener">
+        <div><div class="pc-link-label">${escapeHtml(l.label)}</div><div class="pc-link-school">${escapeHtml(l.school)}</div></div>
+        <div class="pc-link-arrow">&rarr;</div>
+      </a>`).join("")
+    : `<div class="pc-empty">No bio link available for this player in the current snapshot.</div>`;
+  document.getElementById('playerCardOverlay').classList.add('show');
+}
+function closePlayerCard(){
+  document.getElementById('playerCardOverlay').classList.remove('show');
+}
+document.getElementById('playerCardClose').addEventListener('click', closePlayerCard);
+document.getElementById('playerCardOverlay').addEventListener('click', (e)=>{
+  if(e.target.id === 'playerCardOverlay') closePlayerCard();
+});
+document.addEventListener('keydown', (e)=>{
+  if(e.key === 'Escape') closePlayerCard();
+});
+
+function transferCardLinks(t, isOut, schoolName){
+  const ownLabel = isOut ? "Bio at time of departure" : "Current bio";
+  const otherLabel = isOut ? "Current bio" : "Previous school bio";
+  const otherSchool = isOut ? t.dest : t.from;
+  const links = [{label: ownLabel, school: schoolName, url: t.player ? t.player.profileUrl : ""}];
+  if(otherSchool) links.push({label: otherLabel, school: otherSchool, url: t.matchedPlayer ? t.matchedPlayer.profileUrl : ""});
+  return links;
 }
 
 /* data.lastUpdated is the whole-dataset generation timestamp - "how old is everything
@@ -975,7 +1057,10 @@ function computeTransfers(allSchools, school){
 
   const out = school.players
     .filter(p=>p.category==="Gone" && (p.departureReason||"").startsWith("Transferred to ") && !isAmbiguous(p.name))
-    .map(p=>({name:p.name, dest:p.departureReason.slice("Transferred to ".length), position:p.position}));
+    .map(p=>{
+      const destName = p.departureReason.slice("Transferred to ".length);
+      return {name:p.name, dest:destName, position:p.position, player:p, matchedPlayer: findPlayerAtSchool(allSchools, destName, p.name)};
+    });
 
   const inList = [];
   const confirmedNames = new Set();
@@ -984,7 +1069,8 @@ function computeTransfers(allSchools, school){
     if(s.name === school.name) return;
     s.players.forEach(p=>{
       if(p.category==="Gone" && p.departureReason === `Transferred to ${school.name}` && !isAmbiguous(p.name)){
-        inList.push({name:p.name, from:s.name, division:null, position:p.position, source:"name-match"});
+        inList.push({name:p.name, from:s.name, division:null, position:p.position, source:"name-match",
+          player: findPlayerAtSchool(allSchools, school.name, p.name), matchedPlayer:p});
         confirmedNames.add(p.name.toLowerCase());
       }
     });
@@ -996,13 +1082,14 @@ function computeTransfers(allSchools, school){
     if(origin && origin.matchedName !== school.name){
       const originPlayer = findPlayerAtSchool(allSchools, origin.matchedName, p.name);
       if(!originPlayer || isCorroborated(originPlayer, p)){
-        inList.push({name:p.name, from:origin.matchedName, division: origin.scope==="non-d3" ? origin.division : null, position:p.position, source:"bio-match"});
+        inList.push({name:p.name, from:origin.matchedName, division: origin.scope==="non-d3" ? origin.division : null, position:p.position, source:"bio-match",
+          player:p, matchedPlayer:originPlayer});
         confirmedNames.add(p.name.toLowerCase());
         return;
       }
     }
     if(isTransferExp(p.experience)){
-      inList.push({name:p.name, from:null, division:null, position:p.position, source:"exp-match"});
+      inList.push({name:p.name, from:null, division:null, position:p.position, source:"exp-match", player:p, matchedPlayer:null});
       confirmedNames.add(p.name.toLowerCase());
     }
   });
@@ -1147,20 +1234,22 @@ function renderTeam(school, allSchools){
   if(!xfer.in.length) inEl.innerHTML = `<div class="transfer-empty">None confirmed in this snapshot.</div>`;
   xfer.in.forEach(t=>{
     const d = document.createElement("div");
-    d.className = "transfer-item";
+    d.className = "transfer-item clickable";
     const divisionBadge = t.division ? ` <span class="origin-badge" title="Not a tracked D3 program - best-effort match, not confirmed">${escapeHtml(DIVISION_LABEL[t.division])}</span>` : "";
     const whereHtml = t.from
       ? `from ${escapeHtml(t.from)}${divisionBadge}`
       : `<span title="Source site's own Cl./Exp. tag reads TR - confirmed transfer, but no resolvable previous school">from unknown school</span>`;
     d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">${whereHtml}</span>`;
+    d.addEventListener('click', () => openPlayerCard(t.name, t.position, `arrived via ${t.source.replace("-", " ")}`, transferCardLinks(t, false, school.name)));
     inEl.appendChild(d);
   });
   const outEl = document.getElementById("transferOut"); outEl.innerHTML = "";
   if(!xfer.out.length) outEl.innerHTML = `<div class="transfer-empty">None confirmed in this snapshot.</div>`;
   xfer.out.forEach(t=>{
     const d = document.createElement("div");
-    d.className = "transfer-item";
+    d.className = "transfer-item clickable";
     d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">to ${escapeHtml(t.dest)}</span>`;
+    d.addEventListener('click', () => openPlayerCard(t.name, t.position, "departed via name-match", transferCardLinks(t, true, school.name)));
     outEl.appendChild(d);
   });
 
