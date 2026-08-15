@@ -590,10 +590,15 @@ function buildD3Index(schools){
    for snapshots scraped after that field was added). Older snapshots and the one Presto2
    template that can't distinguish "High School" from "Previous School" by column label alone
    fall back to pulling a candidate out of the free-text highSchool field: sites that embed a
-   prior college there use "HS (Prev)" or "HS / Prev", so only those two positions - plus the
-   whole field as a last resort - are tried, and matching is always exact-normalized against
-   the known-school index rather than a loose substring, so "Boston College HS" can't
-   false-positive against "Boston College". */
+   prior college there use "HS (Prev)" or "HS / Prev", so only those two positions are tried,
+   and matching is always exact-normalized against the known-school index rather than a loose
+   substring, so "Boston College HS" can't false-positive against "Boston College".
+   Deliberately NOT falling back to the whole highSchool field as a last resort: a real high
+   school sharing its bare name with a tracked college ("Hamilton", "Manchester", "Eureka",
+   "Cortland", "Grove City", "John Carroll", ...) is common enough that trying the whole field
+   turned "went to Hamilton High School" into a false "transferred from Hamilton College" for
+   dozens of players who never transferred at all - see the transfer-match audit. Losing the
+   handful of genuine matches that only the whole field would have caught is the safer trade. */
 function previousSchoolCandidates(p){
   if(p.previousSchool && p.previousSchool.trim()) return [p.previousSchool.trim()];
   const text = String(p.highSchool||"").trim();
@@ -605,7 +610,6 @@ function previousSchoolCandidates(p){
     const parts = text.split("/");
     candidates.push(parts[parts.length-1].trim());
   }
-  candidates.push(text);
   return candidates;
 }
 

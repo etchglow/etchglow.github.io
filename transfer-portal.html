@@ -539,10 +539,15 @@ function buildD3Index(schools){
    for snapshots scraped after that field was added). Older snapshots and the one Presto2
    template that can't distinguish "High School" from "Previous School" by column label alone
    fall back to pulling a candidate out of the free-text highSchool field: sites that embed a
-   prior college there use "HS (Prev)" or "HS / Prev", so only those two positions - plus the
-   whole field as a last resort - are tried, and matching is always exact-normalized against
-   the known-school index rather than a loose substring, so "Boston College HS" can't
-   false-positive against "Boston College". */
+   prior college there use "HS (Prev)" or "HS / Prev", so only those two positions are tried,
+   and matching is always exact-normalized against the known-school index rather than a loose
+   substring, so "Boston College HS" can't false-positive against "Boston College".
+   Deliberately NOT falling back to the whole highSchool field as a last resort: a real high
+   school sharing its bare name with a tracked college ("Hamilton", "Manchester", "Eureka",
+   "Cortland", "Grove City", "John Carroll", ...) is common enough that trying the whole field
+   turned "went to Hamilton High School" into a false "transferred from Hamilton College" for
+   dozens of players who never transferred at all - see the transfer-match audit. Losing the
+   handful of genuine matches that only the whole field would have caught is the safer trade. */
 function previousSchoolCandidates(p){
   if(p.previousSchool && p.previousSchool.trim()) return [p.previousSchool.trim()];
   const text = String(p.highSchool||"").trim();
@@ -554,7 +559,6 @@ function previousSchoolCandidates(p){
     const parts = text.split("/");
     candidates.push(parts[parts.length-1].trim());
   }
-  candidates.push(text);
   return candidates;
 }
 
@@ -593,6 +597,67 @@ function findNonD3Incoming(schools, nonD3Index, d3Index){
    any text we infer ourselves. */
 function isTransferExp(exp){
   return String(exp||"").trim().toUpperCase() === "TR";
+}
+
+/* Mirrors RosterScraperService.IsCorroborated - a bio-match only tells you the destination
+   player's own text names a tracked school, not that the specific same-named person found on
+   that school's roster is the same human, and a bare name match is the weakest evidence there
+   is (common names collide). So this only trusts a candidate found at the claimed origin when
+   at least one identity field (hometown or high school) actively agrees, and rejects it outright
+   on a regressed class year (a departing Sr can't reappear elsewhere as a Fr) or a contradicting
+   hometown/high school. A candidate with nothing comparable on either side - both blank - counts
+   as unconfirmed, not trusted: see the transfer-match audit for why. */
+function cityTokens(hometown){
+  if(!hometown) return new Set();
+  const city = String(hometown).split(",")[0].toLowerCase().replace(/[^a-z0-9\s]/g," ");
+  return new Set(city.split(/\s+/).filter(Boolean));
+}
+function highSchoolTokens(highSchool){
+  if(!highSchool) return new Set();
+  let hs = String(highSchool).toLowerCase().replace(/\(.*?\)/g," ").replace(/high school|senior high|\bhs\b/g," ");
+  hs = hs.replace(/[^a-z0-9\s]/g," ");
+  return new Set(hs.split(/\s+/).filter(Boolean));
+}
+function setsOverlap(a, b){
+  for(const x of a) if(b.has(x)) return true;
+  return false;
+}
+// "Agree" | "Conflict" | "Unknown"
+function compareTokenSets(a, b){
+  if(!a.size || !b.size) return "Unknown";
+  return setsOverlap(a,b) ? "Agree" : "Conflict";
+}
+const CLASS_RANK_PATTERNS = [
+  [/\b(gr|grad|graduate|5th|fifth|super\s*senior)\b/i, 5],
+  [/\b(sr|senior)\b/i, 4],
+  [/\b(jr|junior)\b/i, 3],
+  [/\b(so|sophomore)\b/i, 2],
+  [/\b(fr|fy|freshman|first[\s-]?year)\b/i, 1],
+];
+function classRank(cls){
+  const text = String(cls||"").trim();
+  if(!text) return null;
+  for(const [pattern, rank] of CLASS_RANK_PATTERNS) if(pattern.test(text)) return rank;
+  return null;
+}
+// A real transfer's class standing stays the same or advances next season; a parseable
+// regression (Sr -> Fr) is a name collision, not the same person.
+function compareClassRank(a, b){
+  const ra = classRank(a), rb = classRank(b);
+  if(ra == null || rb == null) return "Unknown";
+  return rb < ra ? "Conflict" : "Agree";
+}
+function isCorroborated(departed, arrived){
+  if(compareClassRank(departed.cls, arrived.cls) === "Conflict") return false;
+  const hometown = compareTokenSets(cityTokens(departed.hometown), cityTokens(arrived.hometown));
+  const highSchool = compareTokenSets(highSchoolTokens(departed.highSchool), highSchoolTokens(arrived.highSchool));
+  if(hometown === "Conflict" || highSchool === "Conflict") return false;
+  return hometown === "Agree" || highSchool === "Agree";
+}
+function findPlayerAtSchool(schools, schoolName, name){
+  const school = schools.find(s => s.name === schoolName);
+  if(!school) return null;
+  return school.players.find(p => p.name.toLowerCase() === name.toLowerCase()) || null;
 }
 
 /* ============ transfer event model ============ */
@@ -662,6 +727,12 @@ function buildEvents(schools, byName, nonD3Index, d3Index){
       if(!origin || origin.scope !== "d3" || origin.matchedName === s.name) return;
       const key = p.name.toLowerCase() + "||" + s.name.toLowerCase();
       if(confirmedKeys.has(key)) return;
+      // Only require positive corroboration when there's an actual same-named candidate at the
+      // origin to weigh against - that's the same name-collision risk as the name-match pass
+      // above. When no one by that name is found there at all, there's nothing to contradict the
+      // player's own self-reported previous school, so it stays trusted on its own.
+      const originPlayer = findPlayerAtSchool(schools, origin.matchedName, p.name);
+      if(originPlayer && !isCorroborated(originPlayer, p)) return;
       confirmedKeys.add(key);
       events.push({
         name: p.name, position: p.position || "", positionKey: positionFilterKey((p.position||"").toUpperCase().trim()),
