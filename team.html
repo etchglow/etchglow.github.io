@@ -539,21 +539,43 @@ async function loadNonD3Schools(){
   }catch(e){ return []; }
 }
 
-/* Every school gets its full name indexed, plus one mechanical variant with a trailing
-   "University"/"College" stripped ("North Dakota State University" -> also indexes "North
-   Dakota State"), since bios commonly drop that suffix. This is a deterministic transform, not
-   a hand-authored abbreviation guess - it won't catch a state-system short form like
-   "UW-Whitewater", only a suffix drop. The stripped variant is skipped when it collapses to a
-   single word ("Ithaca College" -> "Ithaca", "Elmira College" -> "Elmira") - that's just the
-   town/founder the school is named after, and a bio candidate equal to a bare town name is far
-   more likely someone's hometown than this school with the suffix dropped. Multi-word strips
-   stay safe to keep. */
+/* Every school gets its full name indexed, plus mechanical variants with a trailing
+   "University"/"College" or a leading "University of " stripped ("North Dakota State
+   University" -> also indexes "North Dakota State"; "University of Mount Union" -> also
+   indexes "Mount Union"), since bios commonly drop whichever half is redundant. This is a
+   deterministic transform, not a hand-authored abbreviation guess - it won't catch a
+   state-system short form like "UW-Whitewater" or a pure initialism like "UMHB", only a
+   suffix/prefix drop. Either stripped variant is skipped when it collapses to a single word
+   ("Ithaca College" -> "Ithaca", "Elmira College" -> "Elmira") - that's just the town/founder
+   the school is named after, and a bio candidate equal to a bare town name is far more likely
+   someone's hometown than this school with the suffix dropped. Multi-word strips stay safe to
+   keep. A handful of real initialisms that keep showing up in bios and can't be derived
+   mechanically (UMHB, UTPB, UTRGV, UNT, ENMU) are hand-mapped separately below rather than
+   guessed at generically - a generic initialism generator would recreate the exact false-
+   positive risk the town-collision guard above exists to prevent. */
 function addSchoolAliases(map, name, entry){
   const add = (variant) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
   add(name);
-  const stripped = name.replace(/\s+(university|college)\s*$/i, "").trim();
-  if(stripped && stripped.toLowerCase() !== name.toLowerCase() && stripped.includes(" ")) add(stripped);
+  const trailingStripped = name.replace(/\s+(university|college)\s*$/i, "").trim();
+  if(trailingStripped && trailingStripped.toLowerCase() !== name.toLowerCase() && trailingStripped.includes(" "))
+    add(trailingStripped);
+  const leadingStripped = name.replace(/^\s*university of\s+/i, "").trim();
+  if(leadingStripped && leadingStripped.toLowerCase() !== name.toLowerCase() && leadingStripped.includes(" "))
+    add(leadingStripped);
+  const extra = MANUAL_SCHOOL_ALIASES[name];
+  if(extra) extra.forEach(add);
 }
+
+/* Real-world initialisms/shorthand seen in scraped bios that no mechanical strip rule can
+   derive - each entry is verified against an actual roster snapshot before being added here,
+   not guessed preemptively, to keep this list from becoming a source of new false positives. */
+const MANUAL_SCHOOL_ALIASES = {
+  "University of Mary Hardin-Baylor": ["UMHB"],
+  "University of Texas Permian Basin": ["UTPB"],
+  "University of Texas Rio Grande Valley": ["UTRGV"],
+  "University of North Texas": ["UNT"],
+  "Eastern New Mexico University": ["ENMU", "Eastern N.M."],
+};
 
 /* Juco names additionally get "X CC" / "X JC" / "X Community College" variants, since roster
    bios abbreviate juco names far more inconsistently than four-year schools. The bare "X" form
@@ -598,19 +620,27 @@ function buildD3Index(schools){
    "Cortland", "Grove City", "John Carroll", ...) is common enough that trying the whole field
    turned "went to Hamilton High School" into a false "transferred from Hamilton College" for
    dozens of players who never transferred at all - see the transfer-match audit. Losing the
-   handful of genuine matches that only the whole field would have caught is the safer trade. */
+   handful of genuine matches that only the whole field would have caught is the safer trade.
+   The parenthetical itself can list more than one prior school for a player who transferred
+   twice ("Permian (UTPB/ENMU)") - each "/"-separated school inside it becomes its own
+   candidate, most recent stop first, since that's the more useful one to display and the
+   more likely to resolve when an earlier stop isn't a tracked school. */
 function previousSchoolCandidates(p){
   if(p.previousSchool && p.previousSchool.trim()) return [p.previousSchool.trim()];
   const text = String(p.highSchool||"").trim();
   if(!text) return [];
-  const candidates = [];
   const parenMatch = text.match(/\(([^)]+)\)\s*$/);
-  if(parenMatch) candidates.push(parenMatch[1].trim());
+  if(parenMatch){
+    const inner = parenMatch[1].trim();
+    return inner.includes("/")
+      ? inner.split("/").map(s=>s.trim()).filter(Boolean).reverse()
+      : [inner];
+  }
   if(text.includes("/")){
     const parts = text.split("/");
-    candidates.push(parts[parts.length-1].trim());
+    return [parts[parts.length-1].trim()];
   }
-  return candidates;
+  return [];
 }
 
 function classifyOrigin(p, nonD3Index, d3Index){
