@@ -47,22 +47,19 @@
   .data-note b{color:var(--chalk);}
 
   .filter-bar{
-    display:none;align-items:center;gap:12px;
-    background:rgba(201,162,39,0.1);border:1px solid var(--gold);
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    background:rgba(244,241,232,0.03);border:1px solid var(--line);
     padding:10px 16px;border-radius:2px;margin-bottom:28px;
     font-family:var(--mono);font-size:12.5px;
     position:sticky;top:12px;z-index:25;
     backdrop-filter:blur(6px);
+    transition:background .12s,border-color .12s;
   }
-  .filter-bar.show{display:flex;flex-wrap:wrap;}
+  .filter-bar.active{background:rgba(201,162,39,0.1);border-color:var(--gold);}
   .filter-label{color:var(--chalk);}
   .tab-bar{display:flex;gap:8px;margin-bottom:32px;}
   .tab-bar .chip{font-size:12px;padding:9px 18px;}
   .filter-label b{color:var(--gold-bright);}
-  .crumb{color:var(--muted);cursor:pointer;text-decoration:none;}
-  .crumb:hover{color:var(--gold-bright);}
-  .crumb.current{color:var(--gold-bright);cursor:default;font-weight:700;}
-  .crumb-sep{color:var(--muted);margin:0 2px;}
 
   section{margin-bottom:52px;}
   .section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px;}
@@ -211,7 +208,10 @@
   </div>
 
   <div class="filter-bar" id="filterBar">
-    <span class="filter-label" id="filterCrumbs"></span>
+    <span class="filter-label">Scope:</span>
+    <select class="school-select" id="filterConfSelect"></select>
+    <select class="school-select" id="filterSchoolSelect"></select>
+    <span class="filter-label" id="filterScopeExtra"></span>
     <button class="filter-clear" id="filterBarClearBtn" style="margin-left:auto;">Clear &#10005;</button>
   </div>
 
@@ -307,13 +307,39 @@
       </div>
       <button type="button" class="filter-clear" id="listFilterClear" style="margin-left:auto;">Clear Filters &#10005;</button>
     </div>
-    <div class="roster-grid" id="transferListGrid">
-      <div class="row-head">
-        <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
-        <span data-sort="fromSchool">From</span><span data-sort="fromConf">Conf.</span>
-        <span data-sort="toSchool">To</span>
+    <div id="transferListSingle">
+      <div class="roster-grid" id="transferListGrid">
+        <div class="row-head">
+          <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
+          <span data-sort="fromSchool">From</span><span data-sort="fromConf">Conf.</span>
+          <span data-sort="toSchool">To</span>
+        </div>
+        <div id="listBody"></div>
       </div>
-      <div id="listBody"></div>
+    </div>
+
+    <!-- Only shown once a school/conference is selected above - "incoming"/"outgoing" has no
+         single meaning against the full unscoped dataset, since every transfer is both. -->
+    <div id="transferListSplit" style="display:none;">
+      <div class="log-title" id="incomingListTitle">Incoming</div>
+      <div class="roster-grid" id="incomingListGrid" style="margin-bottom:22px;">
+        <div class="row-head">
+          <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
+          <span data-sort="fromSchool">From</span><span data-sort="fromConf">Conf.</span>
+          <span data-sort="toSchool">To</span>
+        </div>
+        <div id="incomingListBody"></div>
+      </div>
+
+      <div class="log-title" id="outgoingListTitle">Outgoing</div>
+      <div class="roster-grid" id="outgoingListGrid">
+        <div class="row-head">
+          <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
+          <span data-sort="fromSchool">From</span><span data-sort="fromConf">Conf.</span>
+          <span data-sort="toSchool">To</span>
+        </div>
+        <div id="outgoingListBody"></div>
+      </div>
     </div>
   </section>
 
@@ -873,29 +899,62 @@ function setSchoolFilter(schoolName){
   renderScoped();
 }
 
+/* Rebuilds the school dropdown's option list from whichever conference is currently selected
+   (or every school, if none is) - called on every render since a chart-bar click can change
+   STATE.selectedConference without touching this control directly. */
+function refreshFilterSchoolOptions(){
+  const schoolSel = document.getElementById('filterSchoolSelect');
+  const pool = STATE.selectedConference ? APP.schools.filter(s=>s.confName===STATE.selectedConference) : APP.schools;
+  const names = pool.map(s=>s.name).sort((a,b)=>a.localeCompare(b));
+  schoolSel.innerHTML = `<option value="">All Schools</option>` + names.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+}
+
+/* Keeps the always-visible conference/school dropdowns in sync with STATE, whichever control
+   (these dropdowns, or a school/conference name clicked anywhere else on the page - see
+   bindFilterClicks) last changed it. */
 function renderFilterBar(){
   const bar = document.getElementById('filterBar');
-  const crumbsEl = document.getElementById('filterCrumbs');
   const selConf = STATE.selectedConference, selSchool = STATE.selectedSchool;
+  bar.classList.toggle('active', !!(selConf || selSchool));
 
-  if(!selConf && !selSchool){ bar.classList.remove('show'); return; }
-  bar.classList.add('show');
+  refreshFilterSchoolOptions();
+  document.getElementById('filterConfSelect').value = selConf || "";
+  document.getElementById('filterSchoolSelect').value = selSchool || "";
 
-  let html = `<a class="crumb" data-level="all">All Conferences</a>`;
-  if(selSchool){
-    html += `<span class="crumb-sep">›</span><a class="crumb" data-level="conf">${escapeHtml(selConf)}</a>`;
-    html += `<span class="crumb-sep">›</span><span class="crumb current">${escapeHtml(selSchool)}</span>`;
-    html += `<span class="crumb-sep">·</span><a class="crumb" href="team.html?school=${encodeURIComponent(selSchool)}" style="color:var(--gold-bright);font-weight:700;">Team Profile &rarr;</a>`;
-  } else if(selConf){
-    html += `<span class="crumb-sep">›</span><span class="crumb current">${escapeHtml(selConf)}</span>`;
-  }
-  crumbsEl.innerHTML = html;
-  crumbsEl.querySelectorAll('.crumb[data-level]').forEach(c=>{
-    c.addEventListener('click', ()=>{
-      if(c.dataset.level==="all"){ STATE.selectedConference=null; STATE.selectedSchool=null; }
-      else if(c.dataset.level==="conf"){ STATE.selectedSchool=null; }
-      renderScoped();
-    });
+  document.getElementById('filterScopeExtra').innerHTML = selSchool
+    ? `<a href="team.html?school=${encodeURIComponent(selSchool)}" style="color:var(--gold-bright);font-weight:700;text-decoration:none;">Team Profile &rarr;</a>`
+    : "";
+}
+
+function initFilterBarControls(){
+  const confSel = document.getElementById('filterConfSelect');
+  const schoolSel = document.getElementById('filterSchoolSelect');
+  const confNames = [...new Set(APP.schools.map(s=>s.confName))].sort();
+  confSel.innerHTML = `<option value="">All Conferences</option>` + confNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+
+  confSel.addEventListener('change', ()=>{
+    STATE.selectedConference = confSel.value || null;
+    // A school picked under the old conference may not belong to the new one - drop it rather
+    // than leave a stale, inconsistent selection.
+    if(STATE.selectedSchool){
+      const school = APP.byName.get(STATE.selectedSchool.toLowerCase());
+      if(!school || (STATE.selectedConference && school.confName !== STATE.selectedConference)) STATE.selectedSchool = null;
+    }
+    renderScoped();
+  });
+
+  schoolSel.addEventListener('change', ()=>{
+    const val = schoolSel.value;
+    if(!val){ STATE.selectedSchool = null; renderScoped(); return; }
+    STATE.selectedSchool = val;
+    const school = APP.byName.get(val.toLowerCase());
+    if(school) STATE.selectedConference = school.confName;
+    renderScoped();
+  });
+
+  document.getElementById('filterBarClearBtn').addEventListener('click', ()=>{
+    STATE.selectedConference = null; STATE.selectedSchool = null;
+    renderScoped();
   });
 }
 
@@ -1139,8 +1198,10 @@ function updatePositionCounts(baseList){
   });
 }
 
+/* Covers all three row-heads (single-list and the incoming/outgoing pair) at once - only one
+   set is visible at a time, but keeping all three in sync is simpler than tracking which. */
 function updateListSortHeaders(){
-  document.querySelectorAll('#transferListGrid .row-head span[data-sort]').forEach(span=>{
+  document.querySelectorAll('#transferListSingle .row-head span[data-sort], #transferListSplit .row-head span[data-sort]').forEach(span=>{
     const col = span.dataset.sort;
     span.classList.toggle('sorted', col === listSortColumn);
     span.querySelector('.sort-arrow')?.remove();
@@ -1151,6 +1212,33 @@ function updateListSortHeaders(){
       span.appendChild(arrow);
     }
   });
+}
+
+/* "Incoming"/"outgoing" only has meaning relative to a selected school or conference - an
+   intra-conference transfer counts as both when scoped at the conference level (mirrors
+   aggregateByConference, where the same move adds to that conference's in AND out). */
+function isIncomingEvent(e){
+  if(STATE.selectedSchool) return e.toSchool === STATE.selectedSchool;
+  if(STATE.selectedConference) return e.toConf === STATE.selectedConference;
+  return false;
+}
+function isOutgoingEvent(e){
+  if(STATE.selectedSchool) return e.fromSchool === STATE.selectedSchool;
+  if(STATE.selectedConference) return e.fromConf === STATE.selectedConference;
+  return false;
+}
+
+function renderListBody(bodyId, rows, emptyMsg){
+  const body = document.getElementById(bodyId);
+  if(!rows.length){
+    body.innerHTML = `<div class="list-empty">${emptyMsg}</div>`;
+  } else if(rows.length > 500){
+    body.innerHTML = `<div class="row" style="grid-template-columns:1fr;color:var(--muted);font-family:var(--mono);font-size:12px;">
+      Showing first 500 of ${rows.length} &mdash; narrow with search or filters to see more.</div>` +
+      rows.slice(0,500).map(listRowHtml).join("");
+  } else {
+    body.innerHTML = rows.map(listRowHtml).join("");
+  }
 }
 
 function getNonPositionFilteredList(){
@@ -1180,16 +1268,21 @@ function drawList(){
   });
   updateListSortHeaders();
 
-  document.getElementById('listNote').textContent = `${list.length} of ${getScopedEvents().length} confirmed transfers`;
-  const body = document.getElementById('listBody');
-  if(!list.length){
-    body.innerHTML = `<div class="list-empty">No departures match the current filters.</div>`;
-  } else if(list.length > 500){
-    body.innerHTML = `<div class="row" style="grid-template-columns:1fr;color:var(--muted);font-family:var(--mono);font-size:12px;">
-      Showing first 500 of ${list.length} &mdash; narrow with search or filters to see more.</div>` +
-      list.slice(0,500).map(listRowHtml).join("");
+  const scoped = !!(STATE.selectedSchool || STATE.selectedConference);
+  document.getElementById('transferListSingle').style.display = scoped ? 'none' : '';
+  document.getElementById('transferListSplit').style.display = scoped ? '' : 'none';
+
+  if(!scoped){
+    document.getElementById('listNote').textContent = `${list.length} of ${getScopedEvents().length} confirmed transfers`;
+    renderListBody('listBody', list, "No departures match the current filters.");
   } else {
-    body.innerHTML = list.map(listRowHtml).join("");
+    const incoming = list.filter(isIncomingEvent);
+    const outgoing = list.filter(isOutgoingEvent);
+    document.getElementById('listNote').textContent = `${incoming.length} incoming, ${outgoing.length} outgoing (of ${getScopedEvents().length} confirmed transfers in scope)`;
+    document.getElementById('incomingListTitle').textContent = `Incoming (${incoming.length})`;
+    document.getElementById('outgoingListTitle').textContent = `Outgoing (${outgoing.length})`;
+    renderListBody('incomingListBody', incoming, "No incoming transfers match the current filters.");
+    renderListBody('outgoingListBody', outgoing, "No outgoing transfers match the current filters.");
   }
 }
 
@@ -1228,7 +1321,7 @@ function initListControls(){
     drawList();
   });
 
-  document.querySelectorAll('#transferListGrid .row-head span[data-sort]').forEach(span=>{
+  document.querySelectorAll('#transferListSingle .row-head span[data-sort], #transferListSplit .row-head span[data-sort]').forEach(span=>{
     span.addEventListener('click', ()=>{
       const col = span.dataset.sort;
       if(listSortColumn === col) listSortDir = listSortDir === 'asc' ? 'desc' : 'asc';
@@ -1387,16 +1480,15 @@ Promise.all([loadData(), loadNonD3Schools()]).then(([data, nonD3Schools])=>{
 
   renderHero(data, schools, events, totalGone);
 
+  initFilterBarControls();
   initNonD3Controls();
   initListControls();
   bindFilterClicks(document.getElementById('confActivityTable'));
   bindFilterClicks(document.getElementById('nonD3ListBody'));
   bindFilterClicks(document.getElementById('listBody'));
+  bindFilterClicks(document.getElementById('incomingListBody'));
+  bindFilterClicks(document.getElementById('outgoingListBody'));
   bindFilterClicks(document.getElementById('confirmedLog'));
-  document.getElementById('filterBarClearBtn').addEventListener('click', ()=>{
-    STATE.selectedConference = null; STATE.selectedSchool = null;
-    renderScoped();
-  });
 
   // Renders first, while both tabs still sit in their default (within-visible) markup state -
   // the D3 charts compute pixel width from clientWidth, which is 0 on a display:none ancestor,
