@@ -637,7 +637,12 @@ function departureInfo(p){
 /* ============ hometown -> state/region normalization ============ */
 const LOCATION_MAP = (() => {
   const m = {};
-  const add = (label, keys, country = "United States") => keys.forEach(k => { m[k.toLowerCase().replace(/[.\s]/g,"")] = {label, country}; });
+  // Always register the label itself as a key, not just its abbreviation variants - a handful
+  // of states (Ohio, Texas, ...) happened to list their own full name among their variants and
+  // so worked already, but most didn't, so a hometown spelled out in full ("Cinnaminson, New
+  // Jersey" rather than "N.J.") fell through to the international fallback below and got
+  // miscounted as a non-US player.
+  const add = (label, keys, country = "United States") => [label, ...keys].forEach(k => { m[k.toLowerCase().replace(/[.\s]/g,"")] = {label, country}; });
   add("Alabama", ["AL","Ala"]);
   add("Alaska", ["AK","Alaska","Alas"]);
   add("Arizona", ["AZ","Ariz","Az"]);
