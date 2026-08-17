@@ -158,6 +158,16 @@
   .geo-summary .item .n{color:var(--gold-bright);font-weight:700;font-size:15px;}
   .geo-summary .item .l{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;}
   .geo-note{font-family:var(--mono);font-size:11px;color:var(--stale);margin-top:10px;}
+  .geo-maps{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);}
+  @media (max-width:760px){.geo-maps{grid-template-columns:1fr;}}
+  .geo-map-block{display:flex;flex-direction:column;gap:8px;}
+  .geo-map-label{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);}
+  .geo-map{width:100%;height:auto;display:block;background:rgba(244,241,232,0.02);border-radius:2px;}
+  .geo-map path{stroke:var(--field-dark);stroke-width:0.5;}
+  .geo-map path.no-data{fill:rgba(244,241,232,0.05);}
+  .geo-legend{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10px;color:var(--muted);}
+  .geo-legend-ramp{width:70px;height:8px;border-radius:2px;background:linear-gradient(90deg,#2B2410,var(--gold-bright));}
+  .geo-legend-swatch{width:8px;height:8px;border-radius:1px;background:rgba(244,241,232,0.08);display:inline-block;}
 
   /* transfer portal */
   .transfer-net{display:flex;align-items:baseline;gap:10px;margin-bottom:18px;font-family:var(--mono);}
@@ -270,6 +280,8 @@
 
   footer{color:var(--muted);font-family:var(--mono);font-size:11px;text-align:center;padding-top:20px;border-top:1px solid var(--line);}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
 <script src="scoring.js"></script>
 </head>
 <body>
@@ -347,39 +359,49 @@
       </div>
     </section>
 
-    <div class="two-col">
-      <section>
-        <div class="section-head">
-          <h2>Recruiting Geography</h2>
-          <div class="section-note">Hometown state, parsed from free-text roster bios</div>
-        </div>
-        <div class="panel">
-          <div id="geoBars"></div>
-          <div class="geo-summary" id="geoSummary"></div>
-          <div class="geo-note">Heuristic: states are parsed from the trailing "City, ST" segment of each hometown and normalized from mixed AP/postal styles &mdash; a handful of unusual formats may be misbucketed.</div>
-        </div>
-      </section>
-
-      <section>
-        <div class="section-head">
-          <h2>Transfer Portal Network</h2>
-          <div class="section-note">Confirmed transfers this snapshot &mdash; name-matched, bio-matched, and site-flagged</div>
-        </div>
-        <div class="panel">
-          <div class="transfer-net" id="transferNet"></div>
-          <div class="transfer-cols">
-            <div class="transfer-col">
-              <h3>Arrived Via Transfer</h3>
-              <div id="transferIn"></div>
-            </div>
-            <div class="transfer-col">
-              <h3>Departed Via Transfer</h3>
-              <div id="transferOut"></div>
-            </div>
+    <section>
+      <div class="section-head">
+        <h2>Recruiting Geography</h2>
+        <div class="section-note">Hometown state &amp; country, parsed from free-text roster bios</div>
+      </div>
+      <div class="panel">
+        <div id="geoBars"></div>
+        <div class="geo-summary" id="geoSummary"></div>
+        <div class="geo-maps">
+          <div class="geo-map-block">
+            <div class="geo-map-label">By State</div>
+            <svg class="geo-map" id="geoMapUs" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="geo-legend"><span class="geo-legend-swatch"></span>No data<span class="geo-legend-ramp"></span>Fewer &rarr; More</div>
+          </div>
+          <div class="geo-map-block">
+            <div class="geo-map-label">By Country</div>
+            <svg class="geo-map" id="geoMapWorld" viewBox="0 0 480 300" preserveAspectRatio="xMidYMid meet"></svg>
+            <div class="geo-legend"><span class="geo-legend-swatch"></span>No data<span class="geo-legend-ramp"></span>Fewer &rarr; More</div>
           </div>
         </div>
-      </section>
-    </div>
+        <div class="geo-note">Heuristic: states/countries are parsed from the trailing "City, ST" / "City, Country" segment of each hometown and normalized from mixed AP/postal styles &mdash; a handful of unusual formats may be misbucketed.</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Transfer Portal Network</h2>
+        <div class="section-note">Confirmed transfers this snapshot &mdash; name-matched, bio-matched, and site-flagged</div>
+      </div>
+      <div class="panel">
+        <div class="transfer-net" id="transferNet"></div>
+        <div class="transfer-cols">
+          <div class="transfer-col">
+            <h3>Arrived Via Transfer</h3>
+            <div id="transferIn"></div>
+          </div>
+          <div class="transfer-col">
+            <h3>Departed Via Transfer</h3>
+            <div id="transferOut"></div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <section>
       <div class="section-head">
@@ -615,7 +637,7 @@ function departureInfo(p){
 /* ============ hometown -> state/region normalization ============ */
 const LOCATION_MAP = (() => {
   const m = {};
-  const add = (label, keys) => keys.forEach(k => { m[k.toLowerCase().replace(/[.\s]/g,"")] = label; });
+  const add = (label, keys, country = "United States") => keys.forEach(k => { m[k.toLowerCase().replace(/[.\s]/g,"")] = {label, country}; });
   add("Alabama", ["AL","Ala"]);
   add("Alaska", ["AK","Alaska","Alas"]);
   add("Arizona", ["AZ","Ariz","Az"]);
@@ -667,13 +689,22 @@ const LOCATION_MAP = (() => {
   add("Wisconsin", ["WI","Wis","Wisc","WIs","Wiis","Wisconsin"]);
   add("Wyoming", ["WY","Wyo"]);
   add("Washington, D.C.", ["DC","D.C"]);
-  add("Ontario", ["Ontario","ON","ONT"]);
-  add("Quebec", ["Quebec","Que"]);
-  add("Alberta", ["Alberta","Alta"]);
-  add("Manitoba", ["Manitoba"]);
-  add("British Columbia", ["British Columbia"]);
+  add("Ontario", ["Ontario","ON","ONT"], "Canada");
+  add("Quebec", ["Quebec","Que"], "Canada");
+  add("Alberta", ["Alberta","Alta"], "Canada");
+  add("Manitoba", ["Manitoba"], "Canada");
+  add("British Columbia", ["British Columbia"], "Canada");
   return m;
 })();
+
+// A handful of aliases so a hometown's raw trailing token (which becomes the country
+// for anything outside LOCATION_MAP - see normalizeLocation) lines up with the world
+// choropleth topology's country names, e.g. "London, England" -> "United Kingdom".
+const COUNTRY_ALIASES = {
+  "england": "United Kingdom", "scotland": "United Kingdom", "wales": "United Kingdom",
+  "northernireland": "United Kingdom", "uk": "United Kingdom",
+  "usa": "United States", "us": "United States",
+};
 
 function normalizeLocation(hometown){
   if(!hometown) return null;
@@ -683,8 +714,9 @@ function normalizeLocation(hometown){
   if(!raw) return null;
   const key = raw.toLowerCase().replace(/[.\s]/g,"");
   const mapped = LOCATION_MAP[key];
-  if(mapped) return {label: mapped, intl: false};
-  return {label: raw.replace(/\b\w/g, c=>c.toUpperCase()), intl: true};
+  if(mapped) return {label: mapped.label, intl: false, country: mapped.country};
+  const label = raw.replace(/\b\w/g, c=>c.toUpperCase());
+  return {label, intl: true, country: COUNTRY_ALIASES[key] || label};
 }
 
 /* ============ data loading ============ */
@@ -740,16 +772,83 @@ function computeSizeProfile(players){
 
 function computeGeography(players){
   const counts = {};
+  const countryCounts = {};
   let intl = 0, unknown = 0, distinctHS = new Set();
   players.forEach(p=>{
     const loc = normalizeLocation(p.hometown);
     if(!loc){ unknown++; return; }
     if(loc.intl) intl++;
     counts[loc.label] = (counts[loc.label]||0) + 1;
+    countryCounts[loc.country] = (countryCounts[loc.country]||0) + 1;
     if(p.highSchool) distinctHS.add(p.highSchool.trim().toLowerCase());
   });
   const ranked = Object.entries(counts).sort((a,b)=>b[1]-a[1]);
-  return {ranked, distinctStates: ranked.length, distinctHS: distinctHS.size, intl, unknown, total: players.length};
+  const countryRanked = Object.entries(countryCounts).sort((a,b)=>b[1]-a[1]);
+  return {ranked, countryRanked, distinctStates: ranked.length, distinctHS: distinctHS.size, intl, unknown, total: players.length};
+}
+
+/* ============ choropleth maps ============ */
+// Single-hue sequential ramp (low->high player count) on the site's gold accent, per the
+// dataviz method's "sequential = one hue, light->dark, anchor flips on a dark surface" rule -
+// dim/near-surface at the low end, --gold-bright at the high end. Zero-count regions are NOT
+// on this ramp - they get a flat, visually distinct "no data" fill (see .geo-map path.no-data)
+// so an empty state can't be misread as "some players, very few".
+const GEO_SCALE_LOW = "#2B2410", GEO_SCALE_HIGH = "#E4BE3F";
+let usTopoPromise = null, worldTopoPromise = null;
+
+function loadUsTopology(){
+  if(!usTopoPromise) usTopoPromise = fetch("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json").then(r=>r.json());
+  return usTopoPromise;
+}
+function loadWorldTopology(){
+  if(!worldTopoPromise) worldTopoPromise = fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(r=>r.json());
+  return worldTopoPromise;
+}
+
+// Topology fetches are cached module-level (loadUsTopology/loadWorldTopology above) so
+// switching schools via the search box - which re-runs renderTeam, and this with it - redraws
+// against the same already-fetched topology instead of re-fetching ~150-300KB per switch.
+function renderChoropleth(svgId, topoPromise, objectName, projectionFn, ranked){
+  const svg = d3.select("#"+svgId);
+  const width = +svg.attr("viewBox").split(" ")[2], height = +svg.attr("viewBox").split(" ")[3];
+  const counts = new Map(ranked);
+  const maxCount = ranked.length ? ranked[0][1] : 0;
+  const color = d3.scaleSequential(d3.interpolateHcl(GEO_SCALE_LOW, GEO_SCALE_HIGH)).domain([1, Math.max(maxCount, 1)]);
+
+  topoPromise.then(topo=>{
+    const geo = topojson.feature(topo, topo.objects[objectName]);
+    const projection = projectionFn().fitSize([width, height], geo);
+    const path = d3.geoPath(projection);
+
+    svg.selectAll("path").data(geo.features).join("path")
+      .attr("d", path)
+      .attr("class", d => (counts.get(d.properties.name) || 0) === 0 ? "no-data" : null)
+      .attr("fill", d => {
+        const c = counts.get(d.properties.name) || 0;
+        return c === 0 ? null : color(c);
+      })
+      .each(function(d){
+        const c = counts.get(d.properties.name) || 0;
+        let title = this.querySelector("title");
+        if(!title){ title = document.createElementNS("http://www.w3.org/2000/svg", "title"); this.appendChild(title); }
+        title.textContent = `${d.properties.name}: ${c} player${c === 1 ? "" : "s"}`;
+      });
+  });
+}
+
+// us-atlas/world-atlas name their features slightly differently than the labels
+// normalizeLocation/computeGeography produce (confirmed against the actual topology data,
+// not guessed) - remapped only for the map join, so the bar list's display text is untouched.
+const US_MAP_NAME_OVERRIDES = { "Washington, D.C.": "District of Columbia" };
+const WORLD_MAP_NAME_OVERRIDES = { "United States": "United States of America" };
+
+function renderUsMap(ranked){
+  const mapped = ranked.map(([label, count]) => [US_MAP_NAME_OVERRIDES[label] || label, count]);
+  renderChoropleth("geoMapUs", loadUsTopology(), "states", d3.geoAlbersUsa, mapped);
+}
+function renderWorldMap(ranked){
+  const mapped = ranked.map(([label, count]) => [WORLD_MAP_NAME_OVERRIDES[label] || label, count]);
+  renderChoropleth("geoMapWorld", loadWorldTopology(), "countries", d3.geoNaturalEarth1, mapped);
 }
 
 function computeConferenceAverages(confSchools, thisSchoolName){
@@ -987,6 +1086,8 @@ function renderTeam(school, allSchools){
     <div class="item"><div class="n">${geo.distinctHS}</div><div class="l">High Schools</div></div>
     <div class="item"><div class="n">${geo.intl}</div><div class="l">Intl / Non-US</div></div>
   `;
+  renderUsMap(geo.ranked);
+  renderWorldMap(geo.countryRanked);
 
   // transfers
   const xfer = computeTransfers(allSchools, school);
