@@ -667,11 +667,11 @@ function renderFilterBar(){
 
   let html = `<a class="crumb" data-level="all">All Conferences</a>`;
   if(selSchool){
-    html += `<span class="crumb-sep">›</span><a class="crumb" data-level="conf">${escapeHtml(selConf)}</a>`;
+    html += `<span class="crumb-sep">›</span><a class="crumb" data-level="conf">${escapeHtml(Scoring.confLabel(selConf))}</a>`;
     html += `<span class="crumb-sep">›</span><span class="crumb current">${escapeHtml(selSchool)}</span>`;
     html += `<span class="crumb-sep">·</span><a class="crumb" href="team.html?school=${encodeURIComponent(selSchool)}" style="color:var(--gold-bright);font-weight:700;">Team Profile →</a>`;
   } else if(selConf){
-    html += `<span class="crumb-sep">›</span><span class="crumb current">${escapeHtml(selConf)}</span>`;
+    html += `<span class="crumb-sep">›</span><span class="crumb current">${escapeHtml(Scoring.confLabel(selConf))}</span>`;
   }
   crumbsEl.innerHTML = html;
   crumbsEl.querySelectorAll('.crumb[data-level]').forEach(c=>{
@@ -692,7 +692,7 @@ function renderAll(){
 
   renderFilterBar();
 
-  const scopeLabel = selSchool || selConf || null;
+  const scopeLabel = selSchool || (selConf ? Scoring.confLabel(selConf) : null);
   document.getElementById('sankeyNote').textContent = scopeLabel
     ? `${scopeLabel} only`
     : "Aggregated across schools with a fresh snapshot";
