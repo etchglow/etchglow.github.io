@@ -213,6 +213,67 @@
     return String(exp || "").trim().toUpperCase() === "TR";
   }
 
+  /* ============ shared list/table helpers (escaping, position classification) ============ */
+
+  /* All player/school/position text on every page is scraped from third-party sites and must be
+     treated as untrusted before it's inserted via innerHTML. */
+  function escapeHtml(str) {
+    if (str == null) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  /* Groups the ~240 distinct raw position strings found across schools into Offense / Defense /
+     Special Teams / Other, with a sensible in-group order. Combo tags ("WR/DB") use the first
+     token. Used to build the grouped position-filter checkbox panel on every roster/transfer list. */
+  const OFFENSE_ORDER = ["QB", "RB", "FB", "HB", "TB", "WR", "SL", "SLOT", "SB", "H", "TE", "OL", "OT", "OG", "G", "C"];
+  const DEFENSE_ORDER = ["DL", "DE", "DT", "NT", "EDGE", "LB", "OLB", "ILB", "MLB", "SPUR", "STAR", "BANDIT", "DB", "CB", "NB", "S", "FS", "SS", "SAF", "ROV"];
+  const ST_ORDER = ["K", "PK", "P", "LS", "SPEC"];
+  const POSITION_FILTER_CATEGORIES = ["Offense", "Defense", "Special Teams", "Other"];
+
+  /* Individual line spots that should collapse into a single "OL" filter option rather than each
+     getting their own checkbox. */
+  const OL_ALIASES = new Set(["LT", "RT", "LG", "RG", "OG", "T", "C"]);
+  function positionFilterKey(key) {
+    return OL_ALIASES.has(key) ? "OL" : key;
+  }
+
+  function classifyPosition(raw) {
+    if (!raw) return { category: "Other", rank: 999 };
+    const tokens = raw.toUpperCase().split(/[\/\s]+/).filter(Boolean);
+    for (const tok of tokens) {
+      let idx = OFFENSE_ORDER.indexOf(tok);
+      if (idx !== -1) return { category: "Offense", rank: idx };
+      idx = DEFENSE_ORDER.indexOf(tok);
+      if (idx !== -1) return { category: "Defense", rank: idx };
+      idx = ST_ORDER.indexOf(tok);
+      if (idx !== -1) return { category: "Special Teams", rank: idx };
+    }
+    const lower = raw.toLowerCase();
+    if (/quarterback/.test(lower)) return { category: "Offense", rank: 0 };
+    if (/running back/.test(lower)) return { category: "Offense", rank: 1 };
+    if (/fullback/.test(lower)) return { category: "Offense", rank: 2 };
+    if (/wide receiver/.test(lower)) return { category: "Offense", rank: 4 };
+    if (/tight end/.test(lower)) return { category: "Offense", rank: 6 };
+    if (/offensive/.test(lower)) return { category: "Offense", rank: 7 };
+    if (/defensive end/.test(lower)) return { category: "Defense", rank: 1 };
+    if (/defensive tackle/.test(lower)) return { category: "Defense", rank: 2 };
+    if (/defensive line/.test(lower)) return { category: "Defense", rank: 0 };
+    if (/linebacker/.test(lower)) return { category: "Defense", rank: 5 };
+    if (/defensive back/.test(lower)) return { category: "Defense", rank: 9 };
+    if (/cornerback/.test(lower)) return { category: "Defense", rank: 10 };
+    if (/safety/.test(lower)) return { category: "Defense", rank: 11 };
+    if (/kicker/.test(lower)) return { category: "Special Teams", rank: 0 };
+    if (/punter/.test(lower)) return { category: "Special Teams", rank: 1 };
+    if (/(long snapper|snapper)/.test(lower)) return { category: "Special Teams", rank: 2 };
+    if (/(coach|manager|mgr)/.test(lower)) return { category: "Other", rank: 0 };
+    return { category: "Other", rank: 998 };
+  }
+
   /* ============ field comparisons ============ */
 
   function cityTokens(hometown) {
@@ -394,6 +455,223 @@
   function scoreExpMatch(origin) {
     if (origin) return baseOnly(`TR tag (site-confirmed transfer) + resolved non-D3 origin (${origin.division})`, 93);
     return baseOnly('TR tag (site-confirmed transfer), origin not resolvable from bio text', 90);
+  }
+
+  /* ============ list/table UI: position filter, sortable headers, filter+sort+render cycle ============ */
+
+  /* Builds and wires the grouped position-checkbox filter panel used by every roster/transfer
+     list on the site (full roster log, per-team roster, transfer-portal list). The button/clear/
+     outside-click-to-close wiring below is attached exactly once per call; build(items) can be
+     called again later to rebuild the checkbox rows against a new item set (e.g. team.html
+     rebuilding for a newly-selected school) - each rebuild produces fresh checkboxes with fresh
+     "change" listeners, so nothing here ever double-binds. */
+  function createPositionFilterPanel({ wrap, btn, panel, groupsEl, clearBtn, positionKeyOf, onChange }) {
+    let selected = new Set();
+    let rowEls = {}, countEls = {}, groupEls = [];
+
+    function updateButtonLabel() {
+      btn.textContent = selected.size === 0 ? "All Positions"
+        : selected.size === 1 ? [...selected][0]
+        : `${selected.size} Positions`;
+    }
+
+    function build(items) {
+      selected = new Set();
+      const keyCounts = {};
+      items.forEach(item => {
+        const key = positionKeyOf(item);
+        if (key) keyCounts[key] = (keyCounts[key] || 0) + 1;
+      });
+      const entries = Object.keys(keyCounts).map(pos => ({ pos, count: keyCounts[pos], ...classifyPosition(pos) }));
+      const groups = { Offense: [], Defense: [], "Special Teams": [], Other: [] };
+      entries.forEach(e => groups[e.category].push(e));
+      Object.values(groups).forEach(list => list.sort((a, b) => a.rank - b.rank || a.pos.localeCompare(b.pos)));
+
+      groupsEl.innerHTML = POSITION_FILTER_CATEGORIES.map(cat => {
+        if (!groups[cat].length) return "";
+        return `<div class="pos-group">
+          <div class="pos-group-label">${cat}</div>
+          ${groups[cat].map(e => { const safePos = escapeHtml(e.pos); return `
+            <label class="pos-row">
+              <input type="checkbox" data-pos="${safePos}">
+              <span class="pos-name">${safePos}</span>
+              <span class="pos-count" data-pos-count="${safePos}">(${e.count})</span>
+            </label>`; }).join("")}
+        </div>`;
+      }).join("");
+
+      rowEls = {}; countEls = {};
+      groupsEl.querySelectorAll('.pos-row').forEach(row => {
+        const cb = row.querySelector('input[type=checkbox]');
+        const pos = cb.dataset.pos;
+        rowEls[pos] = row;
+        countEls[pos] = row.querySelector('.pos-count');
+        cb.addEventListener('change', () => {
+          if (cb.checked) selected.add(pos); else selected.delete(pos);
+          updateButtonLabel();
+          onChange();
+        });
+      });
+      groupEls = [...groupsEl.querySelectorAll('.pos-group')];
+      updateButtonLabel();
+    }
+
+    function refreshCounts(baseList) {
+      const keyCounts = {};
+      baseList.forEach(item => {
+        const key = positionKeyOf(item);
+        if (key) keyCounts[key] = (keyCounts[key] || 0) + 1;
+      });
+      Object.keys(rowEls).forEach(pos => {
+        const n = keyCounts[pos] || 0;
+        const show = n > 0 || selected.has(pos);
+        rowEls[pos].style.display = show ? "" : "none";
+        if (show) countEls[pos].textContent = n > 0 ? `(${n})` : "";
+      });
+      groupEls.forEach(g => {
+        const anyVisible = [...g.querySelectorAll('.pos-row')].some(r => r.style.display !== "none");
+        g.style.display = anyVisible ? "" : "none";
+      });
+    }
+
+    function clear() {
+      selected.clear();
+      groupsEl.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+      updateButtonLabel();
+    }
+
+    btn.addEventListener('click', (e) => { e.stopPropagation(); panel.hidden = !panel.hidden; });
+    document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) panel.hidden = true; });
+    if (clearBtn) clearBtn.addEventListener('click', () => { clear(); onChange(); });
+
+    return { get selected() { return selected; }, build, refreshCounts, clear };
+  }
+
+  /* Wires click-to-sort column headers (toggle asc/desc on repeat click of the same column, reset
+     to asc on a new one) via delegation on one or more stable ancestor containers - safe even when
+     the header markup itself gets replaced by innerHTML on every redraw (team.html rebuilds a
+     fresh row-head per category group), since the listener lives on the container, not the cells.
+     applyHeaderClasses() is for pages with static header markup (toggles the "sorted" class/arrow
+     span in place); arrowHtml()/column/dir are for pages that regenerate their own header HTML
+     each draw and just need the current sort state to bake into it. */
+  function createSortableHeaders({ containers, defaultColumn, defaultDir = "asc", onSort }) {
+    let column = defaultColumn, dir = defaultDir;
+    const list = (Array.isArray(containers) ? containers : [containers]).filter(Boolean);
+
+    list.forEach(container => {
+      container.addEventListener('click', (e) => {
+        const span = e.target.closest('[data-sort]');
+        if (!span || !container.contains(span)) return;
+        const col = span.dataset.sort;
+        if (column === col) dir = dir === 'asc' ? 'desc' : 'asc';
+        else { column = col; dir = 'asc'; }
+        onSort();
+      });
+    });
+
+    function applyHeaderClasses() {
+      list.forEach(container => {
+        container.querySelectorAll('[data-sort]').forEach(span => {
+          const col = span.dataset.sort;
+          span.classList.toggle('sorted', col === column);
+          span.querySelector('.sort-arrow')?.remove();
+          if (col === column) {
+            const arrow = document.createElement('span');
+            arrow.className = 'sort-arrow';
+            arrow.textContent = dir === 'asc' ? '▲' : '▼';
+            span.appendChild(arrow);
+          }
+        });
+      });
+    }
+
+    function arrowHtml(col) {
+      return col === column ? `<span class="sort-arrow">${dir === 'asc' ? '▲' : '▼'}</span>` : '';
+    }
+
+    function reset() { column = defaultColumn; dir = defaultDir; }
+
+    return { get column() { return column; }, get dir() { return dir; }, applyHeaderClasses, arrowHtml, reset };
+  }
+
+  /* Composes the pieces above into the filter -> sort -> render cycle shared by every player/
+     transfer list on the site (full roster log, per-team roster, transfer-portal list). Search
+     and position filtering happen here; scope filters that differ per page (category chips,
+     conference/school dropdowns, height/weight) stay page-side inside getItems() - it's called
+     fresh on every draw() and can read whatever page-level filter state it wants. Rendering/
+     grouping also stays page-side (onDraw) since that's the part that genuinely differs (a flat
+     table vs. category-grouped tables vs. an incoming/outgoing split).
+     clearFilters() clears search + position selection only (what a page's own "Clear Filters"
+     button should do - none of these pages reset sort order when a user clears filters).
+     reset(items) is the stronger version used when the whole panel needs to point at a new item
+     set (team.html, switching schools): search/position/sort all reset and the position
+     checkboxes rebuild, without re-wiring anything (that only ever happens once, above). */
+  function createListPanel({
+    searchInput, searchHaystack,
+    positionFilterOf, position, initialItems,
+    sortValue, tieBreak, headerContainers, defaultSort = { column: "name", dir: "asc" },
+    getItems, onDraw,
+  }) {
+    let searchTerm = "";
+    const posPanel = positionFilterOf
+      ? createPositionFilterPanel({ ...position, positionKeyOf: positionFilterOf, onChange: draw })
+      : null;
+    const headers = createSortableHeaders({
+      containers: headerContainers, defaultColumn: defaultSort.column, defaultDir: defaultSort.dir, onSort: draw,
+    });
+
+    if (searchInput) searchInput.addEventListener('input', () => { searchTerm = searchInput.value; draw(); });
+    if (posPanel) posPanel.build(initialItems || getItems());
+
+    function draw() {
+      let base = getItems();
+      if (searchHaystack) {
+        const needle = searchTerm.trim().toLowerCase();
+        if (needle) base = base.filter(item => searchHaystack(item).toLowerCase().includes(needle));
+      }
+      if (posPanel) posPanel.refreshCounts(base);
+      const filtered = (posPanel && posPanel.selected.size)
+        ? base.filter(item => posPanel.selected.has(positionFilterOf(item)))
+        : base;
+
+      const sorted = filtered.slice().sort((a, b) => {
+        const va = sortValue(a, headers.column), vb = sortValue(b, headers.column);
+        let cmp = va < vb ? -1 : va > vb ? 1 : 0;
+        if (cmp === 0 && tieBreak) cmp = tieBreak(a).localeCompare(tieBreak(b));
+        return headers.dir === 'asc' ? cmp : -cmp;
+      });
+      headers.applyHeaderClasses();
+      onDraw(sorted);
+    }
+
+    function clearFilters() {
+      searchTerm = "";
+      if (searchInput) searchInput.value = "";
+      if (posPanel) posPanel.clear();
+    }
+
+    function reset(items) {
+      clearFilters();
+      headers.reset();
+      if (posPanel) posPanel.build(items);
+    }
+
+    return { draw, clearFilters, reset, headers };
+  }
+
+  /* Delegates clicks on any [data-card-index] element inside `container` to
+     container._cardData[index]() - the page sets _cardData to an array of zero-arg callbacks
+     each time it renders rows. Safe to call repeatedly on the same container (e.g. once per
+     render pass); only the first call actually attaches a listener. */
+  function wireCardClicks(container) {
+    if (!container || container._scCardClickBound) return;
+    container._scCardClickBound = true;
+    container.addEventListener('click', (e) => {
+      const cardEl = e.target.closest('[data-card-index]');
+      if (!cardEl) return;
+      const item = (container._cardData || [])[+cardEl.dataset.cardIndex];
+      if (item) item();
+    });
   }
 
   /* ============ UI: confidence badge + breakdown popover ============ */
@@ -579,6 +857,9 @@
     identityComponents, isCorroborated, isCorroboratedFromComponents,
     // scoring
     tierFor, clampScore, nameMatchScore, bioMatchScore, scoreExpMatch,
+    // list/table helpers
+    escapeHtml, classifyPosition, positionFilterKey, POSITION_FILTER_CATEGORIES,
+    createPositionFilterPanel, createSortableHeaders, createListPanel, wireCardClicks,
     // UI
     initUI, badge, wireBadges,
   };

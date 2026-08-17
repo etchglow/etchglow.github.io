@@ -476,66 +476,10 @@ function parseWeightToLbs(str){
   return lbs;
 }
 
-/* Position classification: groups the ~240 distinct raw position strings
-   found across schools into Offense / Defense / Special Teams / Other,
-   with a sensible in-group order. Combo tags ("WR/DB") use the first token. */
-const OFFENSE_ORDER = ["QB","RB","FB","HB","TB","WR","SL","SLOT","SB","H","TE","OL","OT","OG","G","C"];
-const DEFENSE_ORDER = ["DL","DE","DT","NT","EDGE","LB","OLB","ILB","MLB","SPUR","STAR","BANDIT","DB","CB","NB","S","FS","SS","SAF","ROV"];
-const ST_ORDER = ["K","PK","P","LS","SPEC"];
-
-/* Individual line spots that should collapse into a single "OL" filter option
-   rather than each getting their own checkbox. */
-const OL_ALIASES = new Set(["LT","RT","LG","RG","OG","T","C"]);
-function positionFilterKey(key){
-  return OL_ALIASES.has(key) ? "OL" : key;
-}
-
-function classifyPosition(raw){
-  if(!raw) return {category:"Other", rank:999};
-  const tokens = raw.toUpperCase().split(/[\/\s]+/).filter(Boolean);
-  for(const tok of tokens){
-    let idx = OFFENSE_ORDER.indexOf(tok);
-    if(idx !== -1) return {category:"Offense", rank:idx};
-    idx = DEFENSE_ORDER.indexOf(tok);
-    if(idx !== -1) return {category:"Defense", rank:idx};
-    idx = ST_ORDER.indexOf(tok);
-    if(idx !== -1) return {category:"Special Teams", rank:idx};
-  }
-  const lower = raw.toLowerCase();
-  if(/quarterback/.test(lower)) return {category:"Offense", rank:0};
-  if(/running back/.test(lower)) return {category:"Offense", rank:1};
-  if(/fullback/.test(lower)) return {category:"Offense", rank:2};
-  if(/wide receiver/.test(lower)) return {category:"Offense", rank:4};
-  if(/tight end/.test(lower)) return {category:"Offense", rank:6};
-  if(/offensive/.test(lower)) return {category:"Offense", rank:7};
-  if(/defensive end/.test(lower)) return {category:"Defense", rank:1};
-  if(/defensive tackle/.test(lower)) return {category:"Defense", rank:2};
-  if(/defensive line/.test(lower)) return {category:"Defense", rank:0};
-  if(/linebacker/.test(lower)) return {category:"Defense", rank:5};
-  if(/defensive back/.test(lower)) return {category:"Defense", rank:9};
-  if(/cornerback/.test(lower)) return {category:"Defense", rank:10};
-  if(/safety/.test(lower)) return {category:"Defense", rank:11};
-  if(/kicker/.test(lower)) return {category:"Special Teams", rank:0};
-  if(/punter/.test(lower)) return {category:"Special Teams", rank:1};
-  if(/(long snapper|snapper)/.test(lower)) return {category:"Special Teams", rank:2};
-  if(/(coach|manager|mgr)/.test(lower)) return {category:"Other", rank:0};
-  return {category:"Other", rank:998};
-}
-
-/* All data below (school names, conference names, player names, positions,
-   class years, hometowns, high schools, heights, weights) is scraped from
-   third-party sites and must be treated as untrusted before it's inserted
-   via innerHTML. This escapes it for safe use in both text nodes and
-   double-quoted HTML attributes. */
-function escapeHtml(str){
-  if(str == null) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+/* Position classification and HTML-escaping are shared across all three pages - see scoring.js. */
+const classifyPosition = Scoring.classifyPosition;
+const positionFilterKey = Scoring.positionFilterKey;
+const escapeHtml = Scoring.escapeHtml;
 
 /* Player-card popup: shows whichever bio links are actually resolvable, so a claimed transfer
    can be checked against the source sites directly. This page only has departureReason to work
@@ -1078,10 +1022,7 @@ document.getElementById('cyToggle').addEventListener('click',(e)=>{
 
 /* ============ ROSTER TABLE ============ */
 let currentFilter = "all";
-let currentSearch = "";
 let rosterDraw = null;
-let sortColumn = "name";
-let sortDir = "asc";
 
 function sortValue(p, col){
   if(col === "cls"){
@@ -1094,101 +1035,18 @@ function sortValue(p, col){
   return (p[col] || "").toString().toLowerCase();
 }
 
-let selectedPositions = new Set();
-let posCountEls = {};
-let posRowEls = {};
-let posGroupEls = [];
-
 function renderRosterTable(schools, allPlayers){
   const confSelect = document.getElementById('confFilter');
   const schoolSelect = document.getElementById('schoolFilter');
-  const posBtn = document.getElementById('posFilterBtn');
-  const posPanel = document.getElementById('posFilterPanel');
-  const posPanelGroups = document.getElementById('posPanelGroups');
   const heightOpEl = document.getElementById('heightOp');
   const heightValEl = document.getElementById('heightVal');
   const weightOpEl = document.getElementById('weightOp');
   const weightValEl = document.getElementById('weightVal');
+  const rosterBody = document.getElementById('rosterBody');
 
   const confNames = [...new Set(schools.map(s=>s.confName))].sort((a,b)=>Scoring.confLabel(a).localeCompare(Scoring.confLabel(b)));
   confSelect.innerHTML = `<option value="all">All Conferences</option>` +
     confNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(Scoring.confLabel(c))}</option>`).join("");
-
-  /* Build the (static) list of position checkboxes, grouped and ordered.
-     Keys are uppercase-normalized so case variants ("Rb"/"RB") collapse together. */
-  function buildPositionPanel(){
-    const keyCounts = {};
-    allPlayers.forEach(p=>{ if(p.positionKey){ const k = positionFilterKey(p.positionKey); keyCounts[k] = (keyCounts[k]||0)+1; } });
-    const entries = Object.keys(keyCounts).map(pos=>({pos, count:keyCounts[pos], ...classifyPosition(pos)}));
-    const groups = {Offense:[], Defense:[], "Special Teams":[], Other:[]};
-    entries.forEach(e=> groups[e.category].push(e));
-    Object.values(groups).forEach(list=> list.sort((a,b)=> a.rank-b.rank || a.pos.localeCompare(b.pos)));
-
-    posPanelGroups.innerHTML = ["Offense","Defense","Special Teams","Other"].map(cat=>{
-      if(groups[cat].length===0) return "";
-      return `<div class="pos-group">
-        <div class="pos-group-label">${cat}</div>
-        ${groups[cat].map(e=>{ const safePos = escapeHtml(e.pos); return `
-          <label class="pos-row">
-            <input type="checkbox" data-pos="${safePos}">
-            <span class="pos-name">${safePos}</span>
-            <span class="pos-count" data-pos-count="${safePos}">(${e.count})</span>
-          </label>`; }).join("")}
-      </div>`;
-    }).join("");
-
-    posCountEls = {};
-    posRowEls = {};
-    posPanelGroups.querySelectorAll('.pos-row').forEach(row=>{
-      const cb = row.querySelector('input[type=checkbox]');
-      const pos = cb.dataset.pos;
-      posRowEls[pos] = row;
-      posCountEls[pos] = row.querySelector('.pos-count');
-      cb.addEventListener('change', ()=>{
-        if(cb.checked) selectedPositions.add(pos); else selectedPositions.delete(pos);
-        updatePosButtonLabel();
-        draw();
-      });
-    });
-    posGroupEls = [...posPanelGroups.querySelectorAll('.pos-group')];
-  }
-
-  function updatePosButtonLabel(){
-    if(selectedPositions.size===0) posBtn.textContent = "All Positions";
-    else if(selectedPositions.size===1) posBtn.textContent = [...selectedPositions][0];
-    else posBtn.textContent = `${selectedPositions.size} Positions`;
-  }
-
-  function updatePositionCounts(baseList){
-    const keyCounts = {};
-    baseList.forEach(p=>{ if(p.positionKey){ const k = positionFilterKey(p.positionKey); keyCounts[k] = (keyCounts[k]||0)+1; } });
-    Object.keys(posRowEls).forEach(pos=>{
-      const n = keyCounts[pos] || 0;
-      const show = n > 0 || selectedPositions.has(pos);
-      posRowEls[pos].style.display = show ? "" : "none";
-      if(show) posCountEls[pos].textContent = n > 0 ? `(${n})` : "";
-    });
-    posGroupEls.forEach(groupEl=>{
-      const anyVisible = [...groupEl.querySelectorAll('.pos-row')].some(r=> r.style.display !== "none");
-      groupEl.style.display = anyVisible ? "" : "none";
-    });
-  }
-
-  buildPositionPanel();
-
-  posBtn.addEventListener('click',(e)=>{
-    e.stopPropagation();
-    posPanel.hidden = !posPanel.hidden;
-  });
-  document.addEventListener('click',(e)=>{
-    if(!document.getElementById('posFilterWrap').contains(e.target)) posPanel.hidden = true;
-  });
-  document.getElementById('posClearBtn').addEventListener('click',()=>{
-    selectedPositions.clear();
-    posPanelGroups.querySelectorAll('input[type=checkbox]').forEach(cb=> cb.checked=false);
-    updatePosButtonLabel();
-    draw();
-  });
 
   let lastPopulatedKey = undefined;
   function populateSchoolOptions(){
@@ -1202,23 +1060,9 @@ function renderRosterTable(schools, allPlayers){
       scoped.map(s=>{ const safe = escapeHtml(s.name); return `<option value="${safe}">${safe}</option>`; }).join("");
   }
 
-  function updateSortHeaders(){
-    document.querySelectorAll('.row-head span').forEach(span=>{
-      const col = span.dataset.sort;
-      span.classList.toggle('sorted', col === sortColumn);
-      span.querySelector('.sort-arrow')?.remove();
-      if(col === sortColumn){
-        const arrow = document.createElement('span');
-        arrow.className = 'sort-arrow';
-        arrow.textContent = sortDir === 'asc' ? '▲' : '▼';
-        span.appendChild(arrow);
-      }
-    });
-  }
-
-  /* Everything except the position filter — used both for the final list
-     and for the live per-position counts in the dropdown. */
-  function getNonPositionFiltered(){
+  /* Everything the shared list panel doesn't own: category chip, conference/school scope, and
+     height/weight range. Search and position filtering happen inside Scoring.createListPanel. */
+  function getItems(){
     const currentConf = STATE.selectedConference || "all";
     const currentSchool = STATE.selectedSchool || "all";
     const heightOp = heightOpEl.value;
@@ -1243,10 +1087,42 @@ function renderRosterTable(schools, allPlayers){
         if(weightOp==="<" && !(p.weightLb<weightVal)) return false;
         if(weightOp==="=" && !(p.weightLb===weightVal)) return false;
       }
-      if(currentSearch && !p.name.toLowerCase().includes(currentSearch.toLowerCase())) return false;
       return true;
     });
   }
+
+  function onDraw(list){
+    document.getElementById('rosterCount').textContent = `${list.length} players`;
+    const shown = list.length > 500 ? list.slice(0,500) : list;
+    rosterBody._cardData = shown.map(p => () => openPlayerCardForRosterRow(p));
+    if(list.length > 500){
+      rosterBody.innerHTML = `<div class="row" style="grid-template-columns:1fr;color:var(--muted);font-family:var(--mono);font-size:12px;">
+        Showing first 500 of ${list.length} — narrow with search or filters to see more.</div>` +
+        shown.map(rowHtml).join("");
+    } else {
+      rosterBody.innerHTML = shown.map(rowHtml).join("");
+    }
+    Scoring.wireBadges(rosterBody);
+  }
+
+  const panel = Scoring.createListPanel({
+    searchInput: document.getElementById('searchBox'),
+    searchHaystack: p => p.name,
+    positionFilterOf: p => positionFilterKey(p.positionKey),
+    position: {
+      wrap: document.getElementById('posFilterWrap'),
+      btn: document.getElementById('posFilterBtn'),
+      panel: document.getElementById('posFilterPanel'),
+      groupsEl: document.getElementById('posPanelGroups'),
+      clearBtn: document.getElementById('posClearBtn'),
+    },
+    initialItems: allPlayers,
+    sortValue,
+    headerContainers: document.querySelector('.row-head'),
+    defaultSort: {column:'name', dir:'asc'},
+    getItems,
+    onDraw,
+  });
 
   function draw(){
     const currentConf = STATE.selectedConference || "all";
@@ -1254,32 +1130,7 @@ function renderRosterTable(schools, allPlayers){
     populateSchoolOptions();
     confSelect.value = currentConf;
     schoolSelect.value = currentSchool;
-
-    const baseList = getNonPositionFiltered();
-    updatePositionCounts(baseList);
-
-    let list = selectedPositions.size===0
-      ? baseList
-      : baseList.filter(p=> selectedPositions.has(positionFilterKey(p.positionKey)));
-
-    list.sort((a,b)=>{
-      const va = sortValue(a, sortColumn), vb = sortValue(b, sortColumn);
-      let cmp = va < vb ? -1 : va > vb ? 1 : 0;
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    updateSortHeaders();
-    document.getElementById('rosterCount').textContent = `${list.length} players`;
-    const body = document.getElementById('rosterBody');
-    const shown = list.length > 500 ? list.slice(0,500) : list;
-    body._cardData = shown.map(p => () => openPlayerCardForRosterRow(p));
-    if(list.length > 500){
-      body.innerHTML = `<div class="row" style="grid-template-columns:1fr;color:var(--muted);font-family:var(--mono);font-size:12px;">
-        Showing first 500 of ${list.length} — narrow with search or filters to see more.</div>` +
-        shown.map(rowHtml).join("");
-    } else {
-      body.innerHTML = shown.map(rowHtml).join("");
-    }
-    Scoring.wireBadges(body);
+    panel.draw();
   }
   // Confidence badge only ever appears for a resolved name-match pairing (this page has no
   // classifyOrigin/bio-match machinery - see the comment on findMatchedTransferPlayer above),
@@ -1318,18 +1169,6 @@ function renderRosterTable(schools, allPlayers){
     </div>`;
   }
 
-  document.querySelectorAll('.row-head span').forEach(span=>{
-    span.addEventListener('click',()=>{
-      const col = span.dataset.sort;
-      if(sortColumn === col){
-        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-      } else {
-        sortColumn = col;
-        sortDir = 'asc';
-      }
-      draw();
-    });
-  });
   document.querySelectorAll('.controls .chip').forEach(chip=>{
     chip.addEventListener('click',()=>{
       document.querySelectorAll('.controls .chip').forEach(c=>c.classList.remove('active'));
@@ -1338,7 +1177,6 @@ function renderRosterTable(schools, allPlayers){
       draw();
     });
   });
-  document.getElementById('searchBox').addEventListener('input',(e)=>{ currentSearch = e.target.value; draw(); });
   confSelect.addEventListener('change',(e)=>{
     setConferenceFilter(e.target.value==="all" ? null : e.target.value);
   });
@@ -1355,13 +1193,7 @@ function renderRosterTable(schools, allPlayers){
     draw();
   });
 
-  document.getElementById('rosterBody').addEventListener('click', (e)=>{
-    const cardEl = e.target.closest('[data-card-index]');
-    if(!cardEl) return;
-    const body = document.getElementById('rosterBody');
-    const item = (body._cardData || [])[+cardEl.dataset.cardIndex];
-    if(item) item();
-  });
+  Scoring.wireCardClicks(rosterBody);
 
   rosterDraw = draw;
   draw();

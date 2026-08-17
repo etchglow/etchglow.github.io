@@ -223,6 +223,9 @@
   /* transfer list table */
   .roster-grid{display:grid;grid-template-columns:1fr;gap:1px;background:var(--line);border:1px solid var(--line);}
   .row-head,.row{display:grid;grid-template-columns:1.5fr 0.6fr 0.6fr 1.4fr 1fr 1.4fr;align-items:center;background:var(--field);}
+  #transferListGrid .row-head,#transferListGrid .row,
+  #incomingListGrid .row-head,#incomingListGrid .row,
+  #outgoingListGrid .row-head,#outgoingListGrid .row{grid-template-columns:1.4fr 0.55fr 0.55fr 1.3fr 0.9fr 1.3fr 0.75fr;}
   .row-head{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);padding:10px 14px;background:rgba(244,241,232,0.04);}
   .row-head span{cursor:pointer;user-select:none;display:flex;align-items:center;gap:5px;transition:color .12s;}
   .row-head span:hover{color:var(--chalk);}
@@ -244,6 +247,9 @@
   @media (max-width:720px){
     .section-note{text-align:left;max-width:100%;}
     .row-head,.row{grid-template-columns:1.3fr 0.5fr 1.2fr 1.2fr;}
+    #transferListGrid .row-head,#transferListGrid .row,
+    #incomingListGrid .row-head,#incomingListGrid .row,
+    #outgoingListGrid .row-head,#outgoingListGrid .row{grid-template-columns:1.2fr 0.5fr 1.1fr 1.1fr 0.7fr;}
     .row-head>*:nth-child(3),.row>*:nth-child(3),
     .row-head>*:nth-child(5),.row>*:nth-child(5){display:none;}
   }
@@ -384,7 +390,7 @@
         <div class="row-head">
           <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
           <span data-sort="fromSchool">From</span><span data-sort="fromConf">Conf.</span>
-          <span data-sort="toSchool">To</span>
+          <span data-sort="toSchool">To</span><span data-sort="score">Score</span>
         </div>
         <div id="listBody"></div>
       </div>
@@ -398,7 +404,7 @@
         <div class="row-head">
           <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
           <span data-sort="fromSchool">From</span><span data-sort="fromConf">Conf.</span>
-          <span data-sort="toSchool">To</span>
+          <span data-sort="toSchool">To</span><span data-sort="score">Score</span>
         </div>
         <div id="incomingListBody"></div>
       </div>
@@ -408,7 +414,7 @@
         <div class="row-head">
           <span data-sort="name">Player</span><span data-sort="positionKey">Pos</span><span data-sort="cls">Class</span>
           <span data-sort="fromSchool">From</span><span data-sort="fromConf">Conf.</span>
-          <span data-sort="toSchool">To</span>
+          <span data-sort="toSchool">To</span><span data-sort="score">Score</span>
         </div>
         <div id="outgoingListBody"></div>
       </div>
@@ -476,54 +482,10 @@
 /* ============ shared helpers (mirrors index.html / team.html) ============ */
 const CLASS_ORDER = ["Fr","R-Fr","So","R-So","Jr","R-Jr","Sr","R-Sr","Gr"];
 
-const OFFENSE_ORDER = ["QB","RB","FB","HB","TB","WR","SL","SLOT","SB","H","TE","OL","OT","OG","G","C"];
-const DEFENSE_ORDER = ["DL","DE","DT","NT","EDGE","LB","OLB","ILB","MLB","SPUR","STAR","BANDIT","DB","CB","NB","S","FS","SS","SAF","ROV"];
-const ST_ORDER = ["K","PK","P","LS","SPEC"];
-const POSITION_GROUPS = ["Offense","Defense","Special Teams","Other"];
-const OL_ALIASES = new Set(["LT","RT","LG","RG","OG","T","C"]);
-function positionFilterKey(key){ return OL_ALIASES.has(key) ? "OL" : key; }
-
-function classifyPosition(raw){
-  if(!raw) return {category:"Other", rank:999};
-  const tokens = raw.toUpperCase().split(/[\/\s]+/).filter(Boolean);
-  for(const tok of tokens){
-    let idx = OFFENSE_ORDER.indexOf(tok);
-    if(idx !== -1) return {category:"Offense", rank:idx};
-    idx = DEFENSE_ORDER.indexOf(tok);
-    if(idx !== -1) return {category:"Defense", rank:idx};
-    idx = ST_ORDER.indexOf(tok);
-    if(idx !== -1) return {category:"Special Teams", rank:idx};
-  }
-  const lower = raw.toLowerCase();
-  if(/quarterback/.test(lower)) return {category:"Offense", rank:0};
-  if(/running back/.test(lower)) return {category:"Offense", rank:1};
-  if(/fullback/.test(lower)) return {category:"Offense", rank:2};
-  if(/wide receiver/.test(lower)) return {category:"Offense", rank:4};
-  if(/tight end/.test(lower)) return {category:"Offense", rank:6};
-  if(/offensive/.test(lower)) return {category:"Offense", rank:7};
-  if(/defensive end/.test(lower)) return {category:"Defense", rank:1};
-  if(/defensive tackle/.test(lower)) return {category:"Defense", rank:2};
-  if(/defensive line/.test(lower)) return {category:"Defense", rank:0};
-  if(/linebacker/.test(lower)) return {category:"Defense", rank:5};
-  if(/defensive back/.test(lower)) return {category:"Defense", rank:9};
-  if(/cornerback/.test(lower)) return {category:"Defense", rank:10};
-  if(/safety/.test(lower)) return {category:"Defense", rank:11};
-  if(/kicker/.test(lower)) return {category:"Special Teams", rank:0};
-  if(/punter/.test(lower)) return {category:"Special Teams", rank:1};
-  if(/(long snapper|snapper)/.test(lower)) return {category:"Special Teams", rank:2};
-  if(/(coach|manager|mgr)/.test(lower)) return {category:"Other", rank:0};
-  return {category:"Other", rank:998};
-}
-
-function escapeHtml(str){
-  if(str == null) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+/* Position classification and HTML-escaping are shared across all three pages - see scoring.js. */
+const classifyPosition = Scoring.classifyPosition;
+const positionFilterKey = Scoring.positionFilterKey;
+const escapeHtml = Scoring.escapeHtml;
 
 /* Player-card popup: shows whichever bio links are actually resolvable for a transfer event,
    so a claimed match can be checked against the source sites directly instead of just trusted -
@@ -899,9 +861,7 @@ function renderClassVolumeChart(el, events){
 
 /* ============ page state / render ============ */
 const APP = { data:null, schools:[], byName:new Map(), events:[], totalGone:0 };
-let listFilter = { search:"", fromConf:"all", toConf:"all", positions:new Set() };
-let listSortColumn = "name", listSortDir = "asc";
-let listPosRowEls = {}, listPosCountEls = {}, listPosGroupEls = [];
+let listFilter = { fromConf:"all", toConf:"all" };
 
 function fmtPct(n){ return n==null ? "&mdash;" : Math.round(n) + "%"; }
 
@@ -935,8 +895,9 @@ function nonD3RowInScope(r){
 function getScopedNonD3Rows(){ return nonD3Rows.filter(nonD3RowInScope); }
 
 function setConferenceFilter(confName){
-  if(STATE.selectedConference === confName && !STATE.selectedSchool){
+  if(STATE.selectedConference === confName){
     STATE.selectedConference = null;
+    STATE.selectedSchool = null;
   } else {
     STATE.selectedConference = confName;
     STATE.selectedSchool = null;
@@ -1198,6 +1159,7 @@ function renderConfActivityTable(confAgg){
 function listSortValue(e, col){
   if(col === "cls"){ const i = CLASS_ORDER.indexOf(e.cls); return i===-1 ? 999 : i; }
   if(col === "toSchool"){ return (e.toSchool || "zzz").toLowerCase(); }
+  if(col === "score"){ return e.score; }
   return (e[col] || "").toString().toLowerCase();
 }
 
@@ -1214,6 +1176,7 @@ function listRowHtml(e, i){
   const fromConfHtml = e.fromConf
     ? `<div class="mono-cell filter-link" data-filter-conf="${escapeHtml(e.fromConf)}">${escapeHtml(Scoring.confLabel(e.fromConf))}</div>`
     : `<div class="mono-cell" style="color:var(--stale)">&mdash;</div>`;
+  const scoreBadge = Scoring.badge({score:e.score, tier:e.tier, components:e.components}, e.name, `${e.fromSchool || "Unknown origin"} → ${e.toSchool}`);
   return `<div class="row">
     <div class="cell-name clickable-name" data-card-index="${i}">${escapeHtml(e.name)}</div>
     <div class="mono-cell">${escapeHtml(e.position) || '&mdash;'}</div>
@@ -1221,82 +1184,8 @@ function listRowHtml(e, i){
     ${fromSchoolHtml}
     ${fromConfHtml}
     <div class="mono-cell">${toHtml}</div>
+    <div>${scoreBadge}</div>
   </div>`;
-}
-
-function buildPositionPanel(events){
-  const posPanelGroups = document.getElementById('posPanelGroups');
-  const keyCounts = {};
-  events.forEach(e=>{ if(e.positionKey) keyCounts[e.positionKey] = (keyCounts[e.positionKey]||0)+1; });
-  const entries = Object.keys(keyCounts).map(pos=>({pos, count:keyCounts[pos], ...classifyPosition(pos)}));
-  const groups = {Offense:[], Defense:[], "Special Teams":[], Other:[]};
-  entries.forEach(e=> groups[e.category].push(e));
-  Object.values(groups).forEach(list=> list.sort((a,b)=> a.rank-b.rank || a.pos.localeCompare(b.pos)));
-
-  posPanelGroups.innerHTML = POSITION_GROUPS.map(cat=>{
-    if(groups[cat].length===0) return "";
-    return `<div class="pos-group">
-      <div class="pos-group-label">${cat}</div>
-      ${groups[cat].map(e=>{ const safePos = escapeHtml(e.pos); return `
-        <label class="pos-row">
-          <input type="checkbox" data-pos="${safePos}">
-          <span class="pos-name">${safePos}</span>
-          <span class="pos-count" data-pos-count="${safePos}">(${e.count})</span>
-        </label>`; }).join("")}
-    </div>`;
-  }).join("");
-
-  listPosCountEls = {}; listPosRowEls = {};
-  posPanelGroups.querySelectorAll('.pos-row').forEach(row=>{
-    const cb = row.querySelector('input[type=checkbox]');
-    const pos = cb.dataset.pos;
-    listPosRowEls[pos] = row;
-    listPosCountEls[pos] = row.querySelector('.pos-count');
-    cb.addEventListener('change', ()=>{
-      if(cb.checked) listFilter.positions.add(pos); else listFilter.positions.delete(pos);
-      updatePosButtonLabel();
-      drawList();
-    });
-  });
-  listPosGroupEls = [...posPanelGroups.querySelectorAll('.pos-group')];
-}
-
-function updatePosButtonLabel(){
-  const btn = document.getElementById('posFilterBtn');
-  if(listFilter.positions.size===0) btn.textContent = "All Positions";
-  else if(listFilter.positions.size===1) btn.textContent = [...listFilter.positions][0];
-  else btn.textContent = `${listFilter.positions.size} Positions`;
-}
-
-function updatePositionCounts(baseList){
-  const keyCounts = {};
-  baseList.forEach(e=>{ if(e.positionKey) keyCounts[e.positionKey] = (keyCounts[e.positionKey]||0)+1; });
-  Object.keys(listPosRowEls).forEach(pos=>{
-    const n = keyCounts[pos] || 0;
-    const show = n > 0 || listFilter.positions.has(pos);
-    listPosRowEls[pos].style.display = show ? "" : "none";
-    if(show) listPosCountEls[pos].textContent = n > 0 ? `(${n})` : "";
-  });
-  listPosGroupEls.forEach(g=>{
-    const anyVisible = [...g.querySelectorAll('.pos-row')].some(r=> r.style.display !== "none");
-    g.style.display = anyVisible ? "" : "none";
-  });
-}
-
-/* Covers all three row-heads (single-list and the incoming/outgoing pair) at once - only one
-   set is visible at a time, but keeping all three in sync is simpler than tracking which. */
-function updateListSortHeaders(){
-  document.querySelectorAll('#transferListSingle .row-head span[data-sort], #transferListSplit .row-head span[data-sort]').forEach(span=>{
-    const col = span.dataset.sort;
-    span.classList.toggle('sorted', col === listSortColumn);
-    span.querySelector('.sort-arrow')?.remove();
-    if(col === listSortColumn){
-      const arrow = document.createElement('span');
-      arrow.className = 'sort-arrow';
-      arrow.textContent = listSortDir === 'asc' ? '▲' : '▼';
-      span.appendChild(arrow);
-    }
-  });
 }
 
 /* "Incoming"/"outgoing" only has meaning relative to a selected school or conference - an
@@ -1326,35 +1215,21 @@ function renderListBody(bodyId, rows, emptyMsg){
     ? `<div class="row" style="grid-template-columns:1fr;color:var(--muted);font-family:var(--mono);font-size:12px;">
       Showing first 500 of ${rows.length} &mdash; narrow with search or filters to see more.</div>`
     : "") + shown.map(listRowHtml).join("");
+  Scoring.wireBadges(body);
 }
 
+/* Everything the shared list panel doesn't own: from/to conference scope. Search and position
+   filtering happen inside Scoring.createListPanel. */
 function getNonPositionFilteredList(){
-  const search = listFilter.search.trim().toLowerCase();
   return getScopedEvents().filter(e=>{
     if(listFilter.fromConf!=="all" && e.fromConf!==listFilter.fromConf) return false;
     if(listFilter.toConf==="__unmatched__"){ if(e.toResolved) return false; }
     else if(listFilter.toConf!=="all" && e.toConf!==listFilter.toConf) return false;
-    if(search){
-      const hay = `${e.name} ${e.fromSchool||""} ${e.toSchool||""}`.toLowerCase();
-      if(!hay.includes(search)) return false;
-    }
     return true;
   });
 }
 
-function drawList(){
-  const base = getNonPositionFilteredList();
-  updatePositionCounts(base);
-  const list = listFilter.positions.size===0 ? base : base.filter(e=>listFilter.positions.has(e.positionKey));
-
-  list.sort((a,b)=>{
-    const va = listSortValue(a, listSortColumn), vb = listSortValue(b, listSortColumn);
-    let cmp = va < vb ? -1 : va > vb ? 1 : 0;
-    if(cmp===0) cmp = a.name.localeCompare(b.name);
-    return listSortDir === 'asc' ? cmp : -cmp;
-  });
-  updateListSortHeaders();
-
+function onListDraw(list){
   const scoped = !!(STATE.selectedSchool || STATE.selectedConference);
   document.getElementById('transferListSingle').style.display = scoped ? 'none' : '';
   document.getElementById('transferListSplit').style.display = scoped ? '' : 'none';
@@ -1373,55 +1248,49 @@ function drawList(){
   }
 }
 
-function initListControls(){
-  document.getElementById('listSearch').addEventListener('input', (e)=>{ listFilter.search = e.target.value; drawList(); });
+let listPanel = null;
 
+function initListControls(){
   const confNames = [...new Set(APP.schools.map(s=>s.confName))].sort((a,b)=>Scoring.confLabel(a).localeCompare(Scoring.confLabel(b)));
   const fromSel = document.getElementById('fromConfFilter');
   const toSel = document.getElementById('toConfFilter');
   fromSel.innerHTML = `<option value="all">Any From Conference</option>` + confNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(Scoring.confLabel(c))}</option>`).join("");
   toSel.innerHTML = `<option value="all">Any To Conference</option><option value="__unmatched__">Unmatched Destination School</option>` +
     confNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(Scoring.confLabel(c))}</option>`).join("");
-  fromSel.addEventListener('change', ()=>{ listFilter.fromConf = fromSel.value; drawList(); });
-  toSel.addEventListener('change', ()=>{ listFilter.toConf = toSel.value; drawList(); });
+  fromSel.addEventListener('change', ()=>{ listFilter.fromConf = fromSel.value; listPanel.draw(); });
+  toSel.addEventListener('change', ()=>{ listFilter.toConf = toSel.value; listPanel.draw(); });
 
-  buildPositionPanel(APP.events);
-  const posBtn = document.getElementById('posFilterBtn');
-  const posPanel = document.getElementById('posFilterPanel');
-  posBtn.addEventListener('click', (e)=>{ e.stopPropagation(); posPanel.hidden = !posPanel.hidden; });
-  document.addEventListener('click', (e)=>{
-    if(!document.getElementById('posFilterWrap').contains(e.target)) posPanel.hidden = true;
-  });
-  document.getElementById('posClearBtn').addEventListener('click', ()=>{
-    listFilter.positions.clear();
-    document.querySelectorAll('#posPanelGroups input[type=checkbox]').forEach(cb=>cb.checked=false);
-    updatePosButtonLabel();
-    drawList();
+  listPanel = Scoring.createListPanel({
+    searchInput: document.getElementById('listSearch'),
+    searchHaystack: e => `${e.name} ${e.fromSchool||""} ${e.toSchool||""}`,
+    positionFilterOf: e => e.positionKey,
+    position: {
+      wrap: document.getElementById('posFilterWrap'),
+      btn: document.getElementById('posFilterBtn'),
+      panel: document.getElementById('posFilterPanel'),
+      groupsEl: document.getElementById('posPanelGroups'),
+      clearBtn: document.getElementById('posClearBtn'),
+    },
+    initialItems: APP.events,
+    sortValue: listSortValue,
+    tieBreak: e => e.name,
+    headerContainers: [document.getElementById('transferListGrid'), document.getElementById('incomingListGrid'), document.getElementById('outgoingListGrid')],
+    defaultSort: {column:'name', dir:'asc'},
+    getItems: getNonPositionFilteredList,
+    onDraw: onListDraw,
   });
 
   document.getElementById('listFilterClear').addEventListener('click', ()=>{
-    listFilter = { search:"", fromConf:"all", toConf:"all", positions:new Set() };
-    document.getElementById('listSearch').value = "";
+    listFilter = { fromConf:"all", toConf:"all" };
     fromSel.value = "all"; toSel.value = "all";
-    document.querySelectorAll('#posPanelGroups input[type=checkbox]').forEach(cb=>cb.checked=false);
-    updatePosButtonLabel();
-    drawList();
-  });
-
-  document.querySelectorAll('#transferListSingle .row-head span[data-sort], #transferListSplit .row-head span[data-sort]').forEach(span=>{
-    span.addEventListener('click', ()=>{
-      const col = span.dataset.sort;
-      if(listSortColumn === col) listSortDir = listSortDir === 'asc' ? 'desc' : 'asc';
-      else { listSortColumn = col; listSortDir = 'asc'; }
-      drawList();
-    });
+    listPanel.clearFilters();
+    listPanel.draw();
   });
 }
 
 /* ============ incoming-from-outside-D3 (best-effort) ============ */
 let nonD3Rows = [];
-let nonD3Filter = { search:"", conf:"all", division:"all" };
-let nonD3SortColumn = "name", nonD3SortDir = "asc";
+let nonD3Filter = { conf:"all", division:"all" };
 
 function nonD3SortValue(r, col){
   if(col === "cls"){ const i = CLASS_ORDER.indexOf(r.cls); return i===-1 ? 999 : i; }
@@ -1440,42 +1309,18 @@ function nonD3RowHtml(r, i){
   </div>`;
 }
 
-function updateNonD3SortHeaders(){
-  document.querySelectorAll('#nonD3ListGrid .row-head span[data-sort]').forEach(span=>{
-    const col = span.dataset.sort;
-    span.classList.toggle('sorted', col === nonD3SortColumn);
-    span.querySelector('.sort-arrow')?.remove();
-    if(col === nonD3SortColumn){
-      const arrow = document.createElement('span');
-      arrow.className = 'sort-arrow';
-      arrow.textContent = nonD3SortDir === 'asc' ? '▲' : '▼';
-      span.appendChild(arrow);
-    }
-  });
-}
-
-function getFilteredNonD3(){
-  const search = nonD3Filter.search.trim().toLowerCase();
+/* Everything the shared list panel doesn't own: conference/division scope. Search and sorting
+   happen inside Scoring.createListPanel - this list has no position filter, so positionFilterOf
+   is simply omitted from its config below. */
+function getNonD3Items(){
   return getScopedNonD3Rows().filter(r=>{
     if(nonD3Filter.division!=="all" && r.division!==nonD3Filter.division) return false;
     if(nonD3Filter.conf!=="all" && r.confName!==nonD3Filter.conf) return false;
-    if(search){
-      const hay = `${r.name} ${r.school} ${r.originName}`.toLowerCase();
-      if(!hay.includes(search)) return false;
-    }
     return true;
   });
 }
 
-function drawNonD3List(){
-  const list = getFilteredNonD3().sort((a,b)=>{
-    const va = nonD3SortValue(a, nonD3SortColumn), vb = nonD3SortValue(b, nonD3SortColumn);
-    let cmp = va < vb ? -1 : va > vb ? 1 : 0;
-    if(cmp===0) cmp = a.name.localeCompare(b.name);
-    return nonD3SortDir === 'asc' ? cmp : -cmp;
-  });
-  updateNonD3SortHeaders();
-
+function onNonD3Draw(list){
   document.getElementById('nonD3Count').textContent =
     `${list.length} of ${getScopedNonD3Rows().length} New players whose previous-school text matches a tracked non-D3 program`;
   const body = document.getElementById('nonD3ListBody');
@@ -1493,11 +1338,13 @@ function renderNonD3DivisionBars(rows){
   renderMagnitudeBars(document.getElementById('nonD3DivisionBars'), data, d=>Scoring.DIVISION_LABEL[d.division], d=>d.count);
 }
 
+let nonD3Panel = null;
+
 function initNonD3Controls(){
   const confNames = [...new Set(nonD3Rows.map(r=>r.confName))].sort((a,b)=>Scoring.confLabel(a).localeCompare(Scoring.confLabel(b)));
   const confSel = document.getElementById('nonD3ConfFilter');
   confSel.innerHTML = `<option value="all">Any Conference</option>` + confNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(Scoring.confLabel(c))}</option>`).join("");
-  confSel.addEventListener('change', ()=>{ nonD3Filter.conf = confSel.value; drawNonD3List(); });
+  confSel.addEventListener('change', ()=>{ nonD3Filter.conf = confSel.value; nonD3Panel.draw(); });
 
   const divisionsPresent = DIVISION_ORDER.filter(d=>nonD3Rows.some(r=>r.division===d));
   const chipsEl = document.getElementById('nonD3DivisionChips');
@@ -1508,26 +1355,27 @@ function initNonD3Controls(){
       chipsEl.querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
       chip.classList.add('active');
       nonD3Filter.division = chip.dataset.division;
-      drawNonD3List();
+      nonD3Panel.draw();
     });
   });
 
-  document.getElementById('nonD3Search').addEventListener('input', (e)=>{ nonD3Filter.search = e.target.value; drawNonD3List(); });
+  nonD3Panel = Scoring.createListPanel({
+    searchInput: document.getElementById('nonD3Search'),
+    searchHaystack: r => `${r.name} ${r.school} ${r.originName}`,
+    sortValue: nonD3SortValue,
+    tieBreak: r => r.name,
+    headerContainers: document.getElementById('nonD3ListGrid'),
+    defaultSort: {column:'name', dir:'asc'},
+    getItems: getNonD3Items,
+    onDraw: onNonD3Draw,
+  });
+
   document.getElementById('nonD3FilterClear').addEventListener('click', ()=>{
-    nonD3Filter = { search:"", conf:"all", division:"all" };
-    document.getElementById('nonD3Search').value = "";
+    nonD3Filter = { conf:"all", division:"all" };
     confSel.value = "all";
     chipsEl.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.division==='all'));
-    drawNonD3List();
-  });
-
-  document.querySelectorAll('#nonD3ListGrid .row-head span[data-sort]').forEach(span=>{
-    span.addEventListener('click', ()=>{
-      const col = span.dataset.sort;
-      if(nonD3SortColumn === col) nonD3SortDir = nonD3SortDir === 'asc' ? 'desc' : 'asc';
-      else { nonD3SortColumn = col; nonD3SortDir = 'asc'; }
-      drawNonD3List();
-    });
+    nonD3Panel.clearFilters();
+    nonD3Panel.draw();
   });
 }
 
@@ -1560,9 +1408,9 @@ function renderScoped(){
   renderConfActivityTable(confAgg);
 
   renderNonD3DivisionBars(getScopedNonD3Rows());
-  drawNonD3List();
+  nonD3Panel.draw();
 
-  drawList();
+  listPanel.draw();
 }
 
 /* ============ boot ============ */
