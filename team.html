@@ -958,7 +958,7 @@ function renderTeam(school, allSchools){
 
   // header
   document.getElementById("teamEyebrow").innerHTML =
-    `<a class="crumb" href="index.html">Dashboard</a><span>&rsaquo;</span><span>${escapeHtml(school.confName)}</span>`;
+    `<a class="crumb" href="index.html">Dashboard</a><span>&rsaquo;</span><span>${escapeHtml(Scoring.confLabel(school.confName))}</span>`;
   document.getElementById("teamName").textContent = school.name;
 
   const badges = [];
@@ -1081,7 +1081,7 @@ function renderTeam(school, allSchools){
   const rankNoteEl = document.getElementById("rankNote");
   if(standing.rank){
     const pct = Math.round(standing.rank/standing.total * 100);
-    rankNoteEl.innerHTML = `Ranked <b>#${standing.rank} of ${standing.total}</b> in ${escapeHtml(school.confName)} by retention rate (top ${pct}%).` +
+    rankNoteEl.innerHTML = `Ranked <b>#${standing.rank} of ${standing.total}</b> in ${escapeHtml(Scoring.confLabel(school.confName))} by retention rate (top ${pct}%).` +
       (standing.excluded ? ` ${standing.excluded} conference school(s) excluded &mdash; no fresh snapshot.` : "");
   } else {
     rankNoteEl.textContent = "This school isn't ranked — no fresh snapshot to compute retention from.";
@@ -1374,7 +1374,7 @@ Promise.all([loadData(), Scoring.loadNonD3Schools()]).then(([data, nonD3Schools]
   const datalist = document.getElementById("schoolListDatalist");
   datalist.innerHTML = schools
     .slice().sort((a,b)=>a.name.localeCompare(b.name))
-    .map(s=>`<option value="${escapeHtml(s.name)}">${escapeHtml(s.confName)}</option>`).join("");
+    .map(s=>`<option value="${escapeHtml(s.name)}">${escapeHtml(Scoring.confLabel(s.confName))}</option>`).join("");
 
   document.getElementById("pickerHint").textContent = `${schools.length} schools tracked`;
 

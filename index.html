@@ -766,8 +766,8 @@ function renderAll(){
 /* ============ HERO ============ */
 function renderHero(data, schools, allPlayers){
   const confNames = [...new Set(schools.map(s=>s.confName))];
-  const confLabel = confNames.length <= 3 ? confNames.map(escapeHtml).join(" · ") : `${confNames.length} Conferences`;
-  document.getElementById('eyebrow').innerHTML = `NCAA Division III Football <span style="color:var(--muted);font-weight:400;">· ${confLabel} · ${schools.length} programs</span>`;
+  const confSummary = confNames.length <= 3 ? confNames.map(c=>escapeHtml(Scoring.confLabel(c))).join(" · ") : `${confNames.length} Conferences`;
+  document.getElementById('eyebrow').innerHTML = `NCAA Division III Football <span style="color:var(--muted);font-weight:400;">· ${confSummary} · ${schools.length} programs</span>`;
 
   const freshSchools = schools.filter(s=>s.status==="Success");
   const staleSchools = schools.filter(s=>s.status!=="Success");
@@ -865,20 +865,20 @@ function renderSchoolBars(allSchools, selectedSchool, selectedConference){
     const scoped = allSchools.filter(s=>s.confName===selectedConference).sort(schoolSortFn);
     if(scoped.length === 0){
       el.innerHTML = `<div style="font-family:var(--mono);font-size:13px;color:var(--muted);padding:20px 0;">
-        No refreshed schools in ${escapeHtml(selectedConference)} yet.</div>`;
+        No refreshed schools in ${escapeHtml(Scoring.confLabel(selectedConference))} yet.</div>`;
       return;
     }
     const maxCount = Math.max(...scoped.map(s=>s.currentCount + s.goneCount), 1);
     el.innerHTML = renderSchoolRows(scoped, selectedSchool, maxCount);
   } else {
-    const byConf = d3.groups(allSchools, s=>s.confName).sort((a,b)=>a[0].localeCompare(b[0]));
+    const byConf = d3.groups(allSchools, s=>s.confName).sort((a,b)=>Scoring.confLabel(a[0]).localeCompare(Scoring.confLabel(b[0])));
     const openAttr = byConf.length <= 2 ? ' open' : '';
     el.innerHTML = byConf.map(([confName, list])=>{
       const stats = aggregateConference(allSchools, confName);
       const sortedList = [...list].sort(schoolSortFn);
       const maxCount = Math.max(...sortedList.map(s=>s.currentCount + s.goneCount), 1);
       return `<details class="conf-group"${openAttr}>
-        <summary>${escapeHtml(confName)} <span class="conf-meta">${stats.totalSchools} schools · ${stats.freshSchools}/${stats.totalSchools} refreshed</span></summary>
+        <summary>${escapeHtml(Scoring.confLabel(confName))} <span class="conf-meta">${stats.totalSchools} schools · ${stats.freshSchools}/${stats.totalSchools} refreshed</span></summary>
         <div>${renderSchoolRows(sortedList, selectedSchool, maxCount)}</div>
       </details>`;
     }).join("");
@@ -912,14 +912,15 @@ function renderConferenceBars(schools, selectedConference){
     const gPct = s.currentCount ? (s.goneCount/maxCount*100) : 0;
     const freshClass = s.freshSchools === s.totalSchools ? 'full' : s.freshSchools === 0 ? 'none' : 'partial';
     const safeName = escapeHtml(s.name);
-    const freshTitle = `${s.freshSchools} of ${s.totalSchools} schools in ${safeName} have a fresh roster snapshot`;
+    const safeLabel = escapeHtml(Scoring.confLabel(s.name));
+    const freshTitle = `${s.freshSchools} of ${s.totalSchools} schools in ${safeLabel} have a fresh roster snapshot`;
     return `
       <div class="school-row conf-row${isSelected?' selected':''}" data-conf="${safeName}">
-        <div class="school-name">${safeName}</div>
-        <div class="bar-track" title="${safeName}">
-          <div class="bar-seg returning" style="width:${rPct}%" data-tip="${safeName} · Returning: ${s.returningCount}"></div>
-          <div class="bar-seg new" style="width:${nPct}%" data-tip="${safeName} · New: ${s.newCount}"></div>
-          <div class="bar-seg gone" style="width:${gPct}%" data-tip="${safeName} · Gone: ${s.goneCount}"></div>
+        <div class="school-name">${safeLabel}</div>
+        <div class="bar-track" title="${safeLabel}">
+          <div class="bar-seg returning" style="width:${rPct}%" data-tip="${safeLabel} · Returning: ${s.returningCount}"></div>
+          <div class="bar-seg new" style="width:${nPct}%" data-tip="${safeLabel} · New: ${s.newCount}"></div>
+          <div class="bar-seg gone" style="width:${gPct}%" data-tip="${safeLabel} · Gone: ${s.goneCount}"></div>
         </div>
         <div class="school-counts">
           <span class="freshness-badge ${freshClass}" title="${freshTitle}">${s.freshSchools}/${s.totalSchools} refreshed</span>
@@ -1109,9 +1110,9 @@ function renderRosterTable(schools, allPlayers){
   const weightOpEl = document.getElementById('weightOp');
   const weightValEl = document.getElementById('weightVal');
 
-  const confNames = [...new Set(schools.map(s=>s.confName))].sort();
+  const confNames = [...new Set(schools.map(s=>s.confName))].sort((a,b)=>Scoring.confLabel(a).localeCompare(Scoring.confLabel(b)));
   confSelect.innerHTML = `<option value="all">All Conferences</option>` +
-    confNames.map(c=>{ const safe = escapeHtml(c); return `<option value="${safe}">${safe}</option>`; }).join("");
+    confNames.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(Scoring.confLabel(c))}</option>`).join("");
 
   /* Build the (static) list of position checkboxes, grouped and ordered.
      Keys are uppercase-normalized so case variants ("Rb"/"RB") collapse together. */
@@ -1312,7 +1313,7 @@ function renderRosterTable(schools, allPlayers){
       <div class="mono-cell">${escapeHtml(p.height) || '—'}</div>
       <div class="mono-cell">${escapeHtml(p.weight) || '—'}</div>
       <div class="mono-cell">${escapeHtml(p.highSchool) || '—'}</div>
-      <div class="mono-cell">${escapeHtml(p.confName)}</div>
+      <div class="mono-cell">${escapeHtml(Scoring.confLabel(p.confName))}</div>
       <div class="mono-cell">${escapeHtml(p.school)}</div>
     </div>`;
   }

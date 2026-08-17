@@ -87,6 +87,55 @@
     "NAIA": "NAIA", "NJCAA": "NJCAA", "CCCAA": "CCCAA", "NWAC": "NWAC"
   };
 
+  /* Every confName stored in data.json is ConferenceCatalog.QualifiedName's "{Division}
+     {Conference}" form (e.g. "D3 ASC") - the division prefix disambiguates conferences that
+     reuse the same abbreviation across divisions ("MIAA" is both a D2 and D3 conference), but on
+     its own it reads as a second, meaningless abbreviation stacked on the first. confLabel()
+     strips that prefix and expands the bare conference code to its real name for display,
+     leaving the raw confName (still needed as a stable filter/select value) untouched everywhere
+     it's used for matching rather than shown as text. Keyed by the bare code, not the qualified
+     form, since every conference the site tracks today is D3 - a code added under another
+     division later just falls back to showing its bare abbreviation until this map grows to
+     cover it. */
+  const CONFERENCE_FULL_NAME = {
+    "ARC": "American Rivers Conference",
+    "ASC": "American Southwest Conference",
+    "Centennial": "Centennial Conference",
+    "CCIW": "College Conference of Illinois and Wisconsin",
+    "CNE": "Conference of New England",
+    "E8": "Empire 8",
+    "HCAC": "Heartland Collegiate Athletic Conference",
+    "Landmark": "Landmark Conference",
+    "LibertyLeague": "Liberty League",
+    "MAC": "Middle Atlantic Conferences",
+    "MASCAC": "Massachusetts State Collegiate Athletic Conference",
+    "MIAA": "Michigan Intercollegiate Athletic Association",
+    "MIAC": "Minnesota Intercollegiate Athletic Conference",
+    "Midwest": "Midwest Conference",
+    "NACC": "Northern Athletics Collegiate Conference",
+    "NCAC": "North Coast Athletic Conference",
+    "NESCAC": "New England Small College Athletic Conference",
+    "NEWMAC": "New England Women's and Men's Athletic Conference",
+    "NJAC": "New Jersey Athletic Conference",
+    "Northwest": "Northwest Conference",
+    "OAC": "Ohio Athletic Conference",
+    "ODAC": "Old Dominion Athletic Conference",
+    "PAC": "Presidents' Athletic Conference",
+    "SAA": "Southern Athletic Association",
+    "SCAC": "Southern Collegiate Athletic Conference",
+    "SCIAC": "Southern California Intercollegiate Athletic Conference",
+    "USAS": "USA South Athletic Conference",
+    "WIAC": "Wisconsin Intercollegiate Athletic Conference",
+    "UMAC": "Upper Midwest Athletic Conference",
+    "Independent": "Independent",
+  };
+  const QUALIFIED_CONF_PREFIX = /^(FBS|FCS|D2|D3|NAIA|NJCAA|CCCAA)\s+/;
+  function confLabel(confName) {
+    if (!confName) return confName;
+    const bare = confName.replace(QUALIFIED_CONF_PREFIX, "");
+    return CONFERENCE_FULL_NAME[bare] || bare;
+  }
+
   /* Juco names additionally get "X CC" / "X JC" / "X Community College" variants, since roster
      bios abbreviate juco names far more inconsistently than four-year schools. */
   function buildNonD3Index(schools) {
@@ -522,6 +571,7 @@
   global.Scoring = {
     // matching
     normalizeSchoolText, addSchoolAliases, MANUAL_SCHOOL_ALIASES, JUCO_DIVISIONS, DIVISION_LABEL,
+    CONFERENCE_FULL_NAME, confLabel,
     loadNonD3Schools, buildNonD3Index, buildD3Index, previousSchoolCandidates, classifyOrigin,
     findPlayerAtSchool, flattenSchools, isTransferExp,
     // field comparisons
