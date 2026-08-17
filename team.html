@@ -268,6 +268,7 @@
 
   footer{color:var(--muted);font-family:var(--mono);font-size:11px;text-align:center;padding-top:20px;border-top:1px solid var(--line);}
 </style>
+<script src="scoring.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -652,221 +653,9 @@ function departureInfo(p){
 }
 
 /* ============ non-D3 origin matching ============ */
-const JUCO_DIVISIONS = new Set(["NJCAA","CCCAA","NWAC"]);
-const DIVISION_LABEL = {
-  "D1-FBS":"D1 (FBS)", "D1-FCS":"D1 (FCS)", "D2":"D2",
-  "NAIA":"NAIA", "NJCAA":"NJCAA", "CCCAA":"CCCAA", "NWAC":"NWAC"
-};
-
-function normalizeSchoolText(s){
-  return String(s||"")
-    .toLowerCase()
-    .replace(/&/g," and ")
-    .replace(/[.’']/g,"")
-    .replace(/^\s*the\s+/,"")
-    .replace(/[^a-z0-9]+/g," ")
-    .trim();
-}
-
-async function loadNonD3Schools(){
-  try{
-    const res = await fetch('https://etchglow.github.io/non-d3-football-schools.json', {cache:"no-store"});
-    if(!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data.schools) ? data.schools : [];
-  }catch(e){ return []; }
-}
-
-/* Every school gets its full name indexed, plus mechanical variants with a trailing
-   "University"/"College" or a leading "University of " stripped ("North Dakota State
-   University" -> also indexes "North Dakota State"; "University of Mount Union" -> also
-   indexes "Mount Union"), since bios commonly drop whichever half is redundant. This is a
-   deterministic transform, not a hand-authored abbreviation guess - it won't catch a
-   state-system short form like "UW-Whitewater" or a pure initialism like "UMHB", only a
-   suffix/prefix drop.
-
-   A stripped variant is no longer blocked just for collapsing to a single word ("Washburn
-   University" -> "Washburn", "Graceland University" -> "Graceland"). That guard existed back
-   when a candidate could come from the whole free-text highSchool field, where a bare word
-   was ambiguous between "this is the school" and "this is coincidentally also a real high
-   school's name" (see the Hamilton/Manchester/Eureka false positives in the transfer-match
-   audit). previousSchoolCandidates no longer trusts that whole field - every candidate it
-   returns now comes from a structurally dedicated position (the previousSchool field itself,
-   or a trailing parenthetical / "/" split this template convention only ever uses to mean
-   "previous school"). A bare word arriving through one of those positions is a self-report,
-   not a coincidence, so it's exactly as trustworthy as a multi-word one now. A handful of real
-   initialisms that keep showing up in bios and can't be derived mechanically (UMHB, UTPB,
-   UTRGV, UNT, ENMU) are hand-mapped separately below. */
-function addSchoolAliases(map, name, entry){
-  const add = (variant) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
-  add(name);
-  const trailingStripped = name.replace(/\s+(university|college)\s*$/i, "").trim();
-  if(trailingStripped && trailingStripped.toLowerCase() !== name.toLowerCase())
-    add(trailingStripped);
-  const leadingStripped = name.replace(/^\s*university of\s+/i, "").trim();
-  if(leadingStripped && leadingStripped.toLowerCase() !== name.toLowerCase())
-    add(leadingStripped);
-  const extra = MANUAL_SCHOOL_ALIASES[name];
-  if(extra) extra.forEach(add);
-}
-
-/* Real-world initialisms/shorthand seen in scraped bios that no mechanical strip rule can
-   derive - each entry is verified against an actual roster snapshot before being added here,
-   not guessed preemptively, to keep this list from becoming a source of new false positives. */
-const MANUAL_SCHOOL_ALIASES = {
-  "University of Mary Hardin-Baylor": ["UMHB"],
-  "University of Texas Permian Basin": ["UTPB"],
-  "University of Texas Rio Grande Valley": ["UTRGV"],
-  "University of North Texas": ["UNT"],
-  "Eastern New Mexico University": ["ENMU", "Eastern N.M."],
-};
-
-/* Juco names additionally get "X CC" / "X JC" / "X Community College" variants, since roster
-   bios abbreviate juco names far more inconsistently than four-year schools. The bare "X" form
-   is included on the same footing as the rest of addSchoolAliases now - see its comment for
-   why a single-word candidate reached through a structured position (previousSchool field,
-   trailing parenthetical, "/" split) is trustworthy, not a coincidental town-name collision
-   ("Tyler Junior College" -> "Tyler" was previously withheld for exactly that reason). */
-function buildNonD3Index(schools){
-  const map = new Map();
-  const add = (variant, entry) => { const n = normalizeSchoolText(variant); if(n) map.set(n, entry); };
-  schools.forEach(s=>{
-    const entry = {name:s.name, division:s.division};
-    addSchoolAliases(map, s.name, entry);
-    if(JUCO_DIVISIONS.has(s.division)){
-      const base = s.name.replace(/\s+(community college|junior college|college)\s*$/i, "").trim();
-      if(base && base.toLowerCase() !== s.name.toLowerCase()){
-        add(base, entry);
-        add(base + " CC", entry);
-        add(base + " JC", entry);
-        add(base + " Community College", entry);
-        add(base + " College", entry);
-      }
-    }
-  });
-  return map;
-}
-
-function buildD3Index(schools){
-  const map = new Map();
-  schools.forEach(s=> addSchoolAliases(map, s.name, {name:s.name, confName:s.confName}));
-  return map;
-}
-
-/* Prefers the dedicated previousSchool field (see PlayerEntry.PreviousSchool - only populated
-   for snapshots scraped after that field was added). Older snapshots and the one Presto2
-   template that can't distinguish "High School" from "Previous School" by column label alone
-   fall back to pulling a candidate out of the free-text highSchool field: sites that embed a
-   prior college there use "HS (Prev)" or "HS / Prev", so only those two positions are tried,
-   and matching is always exact-normalized against the known-school index rather than a loose
-   substring, so "Boston College HS" can't false-positive against "Boston College".
-   Deliberately NOT falling back to the whole highSchool field as a last resort: a real high
-   school sharing its bare name with a tracked college ("Hamilton", "Manchester", "Eureka",
-   "Cortland", "Grove City", "John Carroll", ...) is common enough that trying the whole field
-   turned "went to Hamilton High School" into a false "transferred from Hamilton College" for
-   dozens of players who never transferred at all - see the transfer-match audit. Losing the
-   handful of genuine matches that only the whole field would have caught is the safer trade.
-   The parenthetical itself can list more than one prior school for a player who transferred
-   twice ("Permian (UTPB/ENMU)") - each "/"-separated school inside it becomes its own
-   candidate, most recent stop first, since that's the more useful one to display and the
-   more likely to resolve when an earlier stop isn't a tracked school. */
-function previousSchoolCandidates(p){
-  if(p.previousSchool && p.previousSchool.trim()) return [p.previousSchool.trim()];
-  const text = String(p.highSchool||"").trim();
-  if(!text) return [];
-  const parenMatch = text.match(/\(([^)]+)\)\s*$/);
-  if(parenMatch){
-    const inner = parenMatch[1].trim();
-    return inner.includes("/")
-      ? inner.split("/").map(s=>s.trim()).filter(Boolean).reverse()
-      : [inner];
-  }
-  if(text.includes("/")){
-    const parts = text.split("/");
-    return [parts[parts.length-1].trim()];
-  }
-  return [];
-}
-
-function classifyOrigin(p, nonD3Index, d3Index){
-  for(const candidate of previousSchoolCandidates(p)){
-    if(!candidate) continue;
-    const n = normalizeSchoolText(candidate);
-    const d3Hit = d3Index.get(n);
-    if(d3Hit) return {text:candidate, matchedName:d3Hit.name, matchedConf:d3Hit.confName, scope:"d3", division:null};
-    const hit = nonD3Index.get(n);
-    if(hit) return {text:candidate, matchedName:hit.name, matchedConf:null, scope:"non-d3", division:hit.division};
-  }
-  return null;
-}
-
-/* A roster site's own Cl./Exp. eligibility tag (see RosterScraperService.NormalizeExperienceTag)
-   reads "TR" when the site itself marks a player a transfer - independent of, and stronger than,
-   any text we infer ourselves. */
-function isTransferExp(exp){
-  return String(exp||"").trim().toUpperCase() === "TR";
-}
-
-/* Mirrors RosterScraperService.IsCorroborated - a bio-match only tells you the destination
-   player's own text names a tracked school, not that the specific same-named person found on
-   that school's roster is the same human, and a bare name match is the weakest evidence there
-   is (common names collide). So this only trusts a candidate found at the claimed origin when
-   at least one identity field (hometown or high school) actively agrees, and rejects it outright
-   on a regressed class year (a departing Sr can't reappear elsewhere as a Fr) or a contradicting
-   hometown/high school. A candidate with nothing comparable on either side - both blank - counts
-   as unconfirmed, not trusted: see the transfer-match audit for why. */
-function cityTokens(hometown){
-  if(!hometown) return new Set();
-  const city = String(hometown).split(",")[0].toLowerCase().replace(/[^a-z0-9\s]/g," ");
-  return new Set(city.split(/\s+/).filter(Boolean));
-}
-function highSchoolTokens(highSchool){
-  if(!highSchool) return new Set();
-  let hs = String(highSchool).toLowerCase().replace(/\(.*?\)/g," ").replace(/high school|senior high|\bhs\b/g," ");
-  hs = hs.replace(/[^a-z0-9\s]/g," ");
-  return new Set(hs.split(/\s+/).filter(Boolean));
-}
-function setsOverlap(a, b){
-  for(const x of a) if(b.has(x)) return true;
-  return false;
-}
-// "Agree" | "Conflict" | "Unknown"
-function compareTokenSets(a, b){
-  if(!a.size || !b.size) return "Unknown";
-  return setsOverlap(a,b) ? "Agree" : "Conflict";
-}
-const CLASS_RANK_PATTERNS = [
-  [/\b(gr|grad|graduate|5th|fifth|super\s*senior)\b/i, 5],
-  [/\b(sr|senior)\b/i, 4],
-  [/\b(jr|junior)\b/i, 3],
-  [/\b(so|sophomore)\b/i, 2],
-  [/\b(fr|fy|freshman|first[\s-]?year)\b/i, 1],
-];
-function classRank(cls){
-  const text = String(cls||"").trim();
-  if(!text) return null;
-  for(const [pattern, rank] of CLASS_RANK_PATTERNS) if(pattern.test(text)) return rank;
-  return null;
-}
-// A real transfer's class standing stays the same or advances next season; a parseable
-// regression (Sr -> Fr) is a name collision, not the same person.
-function compareClassRank(a, b){
-  const ra = classRank(a), rb = classRank(b);
-  if(ra == null || rb == null) return "Unknown";
-  return rb < ra ? "Conflict" : "Agree";
-}
-function isCorroborated(departed, arrived){
-  if(compareClassRank(departed.cls, arrived.cls) === "Conflict") return false;
-  const hometown = compareTokenSets(cityTokens(departed.hometown), cityTokens(arrived.hometown));
-  const highSchool = compareTokenSets(highSchoolTokens(departed.highSchool), highSchoolTokens(arrived.highSchool));
-  if(hometown === "Conflict" || highSchool === "Conflict") return false;
-  return hometown === "Agree" || highSchool === "Agree";
-}
-function findPlayerAtSchool(schools, schoolName, name){
-  const school = schools.find(s => s.name === schoolName);
-  if(!school) return null;
-  return school.players.find(p => p.name.toLowerCase() === name.toLowerCase()) || null;
-}
+/* School-name matching (normalizeSchoolText/classifyOrigin/etc), field comparisons, and the
+   confidence-score math now live in scoring.js, shared with transfer-portal.html and
+   index.html - see that file for the full reasoning behind each piece. */
 
 /* ============ hometown -> state/region normalization ============ */
 const LOCATION_MAP = (() => {
@@ -948,16 +737,6 @@ async function loadData(){
   const res = await fetch('https://etchglow.github.io/data.json', {cache:"no-store"});
   if(!res.ok) throw new Error("fetch failed: " + res.status);
   return await res.json();
-}
-
-function flattenSchools(data){
-  const list = [];
-  data.conferences.forEach(conf=>{
-    conf.schools.forEach(s=>{
-      list.push(Object.assign({confName: conf.name}, s));
-    });
-  });
-  return list;
 }
 
 const APP = { data:null, schools:[], byName:new Map(), nonD3Index:new Map(), d3Index:new Map() };
@@ -1079,7 +858,10 @@ function computeTransfers(allSchools, school){
     .filter(p=>p.category==="Gone" && (p.departureReason||"").startsWith("Transferred to ") && !isAmbiguous(p.name))
     .map(p=>{
       const destName = p.departureReason.slice("Transferred to ".length);
-      return {name:p.name, dest:destName, position:p.position, player:p, matchedPlayer: findPlayerAtSchool(allSchools, destName, p.name)};
+      const matchedPlayer = Scoring.findPlayerAtSchool(allSchools, destName, p.name);
+      const scored = Scoring.nameMatchScore(p, matchedPlayer);
+      return {name:p.name, dest:destName, position:p.position, player:p, matchedPlayer,
+        score:scored.score, tier:scored.tier, components:scored.components};
     });
 
   const inList = [];
@@ -1089,8 +871,10 @@ function computeTransfers(allSchools, school){
     if(s.name === school.name) return;
     s.players.forEach(p=>{
       if(p.category==="Gone" && p.departureReason === `Transferred to ${school.name}` && !isAmbiguous(p.name)){
+        const arrivedPlayer = Scoring.findPlayerAtSchool(allSchools, school.name, p.name);
+        const scored = Scoring.nameMatchScore(p, arrivedPlayer);
         inList.push({name:p.name, from:s.name, division:null, position:p.position, source:"name-match",
-          player: findPlayerAtSchool(allSchools, school.name, p.name), matchedPlayer:p});
+          player:arrivedPlayer, matchedPlayer:p, score:scored.score, tier:scored.tier, components:scored.components});
         confirmedNames.add(p.name.toLowerCase());
       }
     });
@@ -1098,18 +882,24 @@ function computeTransfers(allSchools, school){
 
   school.players.forEach(p=>{
     if(p.category !== "New" || confirmedNames.has(p.name.toLowerCase())) return;
-    const origin = classifyOrigin(p, APP.nonD3Index, APP.d3Index);
+    const origin = Scoring.classifyOrigin(p, APP.nonD3Index, APP.d3Index);
     if(origin && origin.matchedName !== school.name){
-      const originPlayer = findPlayerAtSchool(allSchools, origin.matchedName, p.name);
-      if(!originPlayer || isCorroborated(originPlayer, p)){
+      const originPlayer = Scoring.findPlayerAtSchool(allSchools, origin.matchedName, p.name);
+      if(!originPlayer || Scoring.isCorroborated(originPlayer, p)){
+        const scored = Scoring.bioMatchScore(originPlayer, p, origin.scope);
         inList.push({name:p.name, from:origin.matchedName, division: origin.scope==="non-d3" ? origin.division : null, position:p.position, source:"bio-match",
-          player:p, matchedPlayer:originPlayer});
+          player:p, matchedPlayer:originPlayer, score:scored.score, tier:scored.tier, components:scored.components});
         confirmedNames.add(p.name.toLowerCase());
         return;
       }
     }
-    if(isTransferExp(p.experience)){
-      inList.push({name:p.name, from:null, division:null, position:p.position, source:"exp-match", player:p, matchedPlayer:null});
+    if(Scoring.isTransferExp(p.experience)){
+      // origin (if any) isn't shown here - see the "from unknown school" display below - so the
+      // score deliberately doesn't credit a resolved-but-hidden origin either; scoreExpMatch(null)
+      // keeps what's scored consistent with what's actually on screen.
+      const scored = Scoring.scoreExpMatch(null);
+      inList.push({name:p.name, from:null, division:null, position:p.position, source:"exp-match", player:p, matchedPlayer:null,
+        score:scored.score, tier:scored.tier, components:scored.components});
       confirmedNames.add(p.name.toLowerCase());
     }
   });
@@ -1258,23 +1048,27 @@ function renderTeam(school, allSchools){
   xfer.in.forEach(t=>{
     const d = document.createElement("div");
     d.className = "transfer-item clickable";
-    const divisionBadge = t.division ? ` <span class="origin-badge" title="Not a tracked D3 program - best-effort match, not confirmed">${escapeHtml(DIVISION_LABEL[t.division])}</span>` : "";
+    const divisionBadge = t.division ? ` <span class="origin-badge" title="Not a tracked D3 program - best-effort match, not confirmed">${escapeHtml(Scoring.DIVISION_LABEL[t.division])}</span>` : "";
     const whereHtml = t.from
       ? `from ${escapeHtml(t.from)}${divisionBadge}`
       : `<span title="Source site's own Cl./Exp. tag reads TR - confirmed transfer, but no resolvable previous school">from unknown school</span>`;
-    d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">${whereHtml}</span>`;
+    const confBadge = Scoring.badge({score:t.score, tier:t.tier, components:t.components}, t.name, `from ${t.from || "unknown school"}`);
+    d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">${whereHtml} ${confBadge}</span>`;
     d.addEventListener('click', () => openPlayerCard(t.name, t.position, `arrived via ${t.source.replace("-", " ")}`, transferCardLinks(t, false, school.name)));
     inEl.appendChild(d);
   });
+  Scoring.wireBadges(inEl);
   const outEl = document.getElementById("transferOut"); outEl.innerHTML = "";
   if(!xfer.out.length) outEl.innerHTML = `<div class="transfer-empty">None confirmed in this snapshot.</div>`;
   xfer.out.forEach(t=>{
     const d = document.createElement("div");
     d.className = "transfer-item clickable";
-    d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">to ${escapeHtml(t.dest)}</span>`;
+    const confBadge = Scoring.badge({score:t.score, tier:t.tier, components:t.components}, t.name, `to ${t.dest}`);
+    d.innerHTML = `<span class="who">${escapeHtml(t.name)}</span><span class="where">to ${escapeHtml(t.dest)} ${confBadge}</span>`;
     d.addEventListener('click', () => openPlayerCard(t.name, t.position, "departed via name-match", transferCardLinks(t, true, school.name)));
     outEl.appendChild(d);
   });
+  Scoring.wireBadges(outEl);
 
   // standing
   const standing = computeStanding(confSchools, school.name);
@@ -1299,19 +1093,28 @@ function renderTeam(school, allSchools){
 
 function rosterRowHtml(p, cat, i){
   const dep = departureInfo(p);
+  // computeTransfers already scored every confirmed pairing this school is party to - reuse that
+  // instead of rescoring, so a roster row's badge can never disagree with the transfer widget's.
+  const xferEntry = rosterXferByName.get(p.name.toLowerCase());
   let statusHtml;
   if(cat==="Gone"){
-    statusHtml = `<span class="status-badge status-Gone dep-${dep.cls}" title="${escapeHtml(dep.title)}">${dep.label}</span>`;
+    const confBadge = xferEntry && xferEntry.dir==="out"
+      ? ' ' + Scoring.badge({score:xferEntry.score, tier:xferEntry.tier, components:xferEntry.components}, p.name, `to ${xferEntry.dest}`)
+      : '';
+    statusHtml = `<span class="status-badge status-Gone dep-${dep.cls}" title="${escapeHtml(dep.title)}">${dep.label}</span>${confBadge}`;
   } else {
     const displayText = p.highSchool || p.previousSchool || "";
-    const origin = classifyOrigin(p, APP.nonD3Index, APP.d3Index);
+    const origin = Scoring.classifyOrigin(p, APP.nonD3Index, APP.d3Index);
     let originBadge = '';
     if(origin && origin.scope==="non-d3"){
-      originBadge = ` <span class="origin-badge" title="${escapeHtml(origin.matchedName + " — best-effort match, not confirmed")}">${escapeHtml(DIVISION_LABEL[origin.division])}</span>`;
-    } else if(!origin && cat==="New" && isTransferExp(p.experience)){
+      originBadge = ` <span class="origin-badge" title="${escapeHtml(origin.matchedName + " — best-effort match, not confirmed")}">${escapeHtml(Scoring.DIVISION_LABEL[origin.division])}</span>`;
+    } else if(!origin && cat==="New" && Scoring.isTransferExp(p.experience)){
       originBadge = ` <span class="origin-badge" title="Source site's own Cl./Exp. tag reads TR - confirmed transfer, but no resolvable previous school">Transfer</span>`;
     }
-    statusHtml = `<span class="mono-cell">${escapeHtml(displayText)}${originBadge}</span>`;
+    const confBadge = xferEntry && xferEntry.dir==="in"
+      ? ' ' + Scoring.badge({score:xferEntry.score, tier:xferEntry.tier, components:xferEntry.components}, p.name, `from ${xferEntry.from || "unknown school"}`)
+      : '';
+    statusHtml = `<span class="mono-cell">${escapeHtml(displayText)}${originBadge}${confBadge}</span>`;
   }
   return `<div class="row">
     <div class="cell-name clickable-name" data-card-index="${i}">${escapeHtml(p.name)}</div>
@@ -1516,6 +1319,7 @@ function renderRosterSection(school){
     if(!rendered){
       rosterTablesEl.innerHTML = `<div class="roster-empty">No players match the current filters.</div>`;
     }
+    Scoring.wireBadges(rosterTablesEl);
   }
 
   // rosterTablesEl persists across draw() calls (only its innerHTML is replaced) and across
@@ -1557,14 +1361,15 @@ document.addEventListener('click', (e)=>{
   if(wrap && panel && !wrap.contains(e.target)) panel.hidden = true;
 });
 
-Promise.all([loadData(), loadNonD3Schools()]).then(([data, nonD3Schools])=>{
+Scoring.initUI();
+Promise.all([loadData(), Scoring.loadNonD3Schools()]).then(([data, nonD3Schools])=>{
   renderScrapeAgeBanner(data);
-  const schools = flattenSchools(data);
+  const schools = Scoring.flattenSchools(data);
   APP.data = data;
   APP.schools = schools;
   schools.forEach(s=>APP.byName.set(s.name.toLowerCase(), s));
-  APP.nonD3Index = buildNonD3Index(nonD3Schools);
-  APP.d3Index = buildD3Index(schools);
+  APP.nonD3Index = Scoring.buildNonD3Index(nonD3Schools);
+  APP.d3Index = Scoring.buildD3Index(schools);
 
   const datalist = document.getElementById("schoolListDatalist");
   datalist.innerHTML = schools
